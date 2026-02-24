@@ -1,0 +1,3 @@
+{
+  "extends": "@tayduong-pharma-erp/config/tsconfig.base.json"
+}

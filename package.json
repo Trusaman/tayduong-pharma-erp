@@ -1,0 +1,31 @@
+{
+  "name": "tayduong-pharma-erp",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "check-types": "turbo check-types",
+    "dev:native": "turbo -F native dev",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F @tayduong-pharma-erp/backend dev",
+    "dev:setup": "turbo -F @tayduong-pharma-erp/backend dev:setup",
+    "check": "biome check --write ."
+  },
+  "dependencies": {
+    "@tayduong-pharma-erp/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@tayduong-pharma-erp/config": "workspace:*",
+    "turbo": "^2.6.3",
+    "typescript": "catalog:"
+  },
+  "packageManager": "pnpm@10.26.0"
+}
