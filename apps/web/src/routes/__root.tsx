@@ -15,10 +15,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { Toaster } from "@/components/ui/sonner";
 import { authClient } from "@/lib/auth-client";
 import { getToken } from "@/lib/auth-server";
+import AppLayout from "@/components/app-layout";
 
-import Header from "../components/header";
 import appCss from "../index.css?url";
-
 const getAuth = createServerFn({ method: "GET" }).handler(async () => {
   return await getToken();
 });
@@ -39,7 +38,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "My App",
+        title: "Tây Dương Pharma ERP",
       },
     ],
     links: [
@@ -71,20 +70,19 @@ function RootDocument() {
       authClient={authClient}
       initialToken={context.token}
     >
-      <html lang="en" className="dark">
+      <html lang="en">
         <head>
           <HeadContent />
         </head>
-        <body>
-          <div className="grid h-svh grid-rows-[auto_1fr]">
-            <Header />
+        <body className="h-screen overflow-hidden">
+          <AppLayout>
             <Outlet />
-          </div>
+          </AppLayout>
           <Toaster richColors />
           <TanStackRouterDevtools position="bottom-left" />
           <Scripts />
         </body>
       </html>
-    </ConvexBetterAuthProvider>
-  );
+  </ConvexBetterAuthProvider>
+);
 }
