@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Search, Package, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Package, AlertTriangle, FolderPlus, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +39,27 @@ export const Route = createFileRoute("/products")({
   component: ProductsPage,
 });
 
+// Default units - can be extended with custom units
+const DEFAULT_UNITS = [
+  { value: "tablet", label: "Tablet" },
+  { value: "bottle", label: "Bottle" },
+  { value: "box", label: "Box" },
+  { value: "vial", label: "Vial" },
+  { value: "ampoule", label: "Ampoule" },
+  { value: "tube", label: "Tube" },
+  { value: "sachet", label: "Sachet" },
+  { value: "piece", label: "Piece" },
+  { value: "capsule", label: "Capsule" },
+  { value: "syringe", label: "Syringe" },
+  { value: "patch", label: "Patch" },
+  { value: "cream", label: "Cream" },
+  { value: "ointment", label: "Ointment" },
+  { value: "drops", label: "Drops" },
+  { value: "inhaler", label: "Inhaler" },
+  { value: "suppository", label: "Suppository" },
+];
+
+
 interface ProductForm {
   name: string;
   sku: string;
@@ -66,21 +87,73 @@ function ProductsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(initialForm);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  
+  // Quick add dialogs
+  const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
+  const [quickCategoryName, setQuickCategoryName] = useState("");
+  const [quickUnitOpen, setQuickUnitOpen] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
 
   const products = useQuery(api.products.listWithStock, { activeOnly: false });
   const categories = useQuery(api.categories.list);
+  const customUnits = useQuery(api.units.list);
 
   const createProduct = useMutation(api.products.create);
   const updateProduct = useMutation(api.products.update);
   const deleteProduct = useMutation(api.products.remove);
+  const createCategory = useMutation(api.categories.create);
+  const createUnit = useMutation(api.units.create);
+
+  // Combine default units with custom units from database
+  const allUnits = [...DEFAULT_UNITS, ...(customUnits?.map(u => ({ value: u.value, label: u.name })) || [])];
+
 
   const filteredProducts = products?.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleQuickAddCategory = async () => {
+    if (!quickCategoryName.trim()) {
+      toast.error("Please enter a category name");
+      return;
+    }
+    try {
+      const categoryId = await createCategory({
+        name: quickCategoryName.trim(),
+      });
+      toast.success("Category created successfully");
+      setQuickCategoryOpen(false);
+      setQuickCategoryName("");
+      setForm({ ...form, categoryId: categoryId as string });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create category");
+    }
+  };
+
+  const handleQuickAddUnit = async () => {
+    if (!newUnitName.trim()) {
+      toast.error("Please enter a unit name");
+      return;
+    }
+    const unitLower = newUnitName.trim().toLowerCase();
+    if (allUnits.some(u => u.value === unitLower)) {
+      toast.error("This unit already exists");
+      return;
+    }
+    try {
+      await createUnit({ name: newUnitName.trim() });
+      toast.success("Unit added successfully");
+      setForm({ ...form, unit: unitLower });
+      setQuickUnitOpen(false);
+      setNewUnitName("");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to add unit");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,6 +232,11 @@ function ProductsPage() {
     return category?.name || "-";
   };
 
+  const getUnitLabel = (unitValue: string) => {
+    const unit = allUnits.find(u => u.value === unitValue);
+    return unit?.label || unitValue;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -204,13 +282,27 @@ function ProductsPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="category">Category</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="category">Category</Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs text-teal-600 hover:text-teal-700 px-2"
+                        onClick={() => setQuickCategoryOpen(true)}
+                      >
+                        <FolderPlus className="mr-1 h-3 w-3" />
+                        New
+                      </Button>
+                    </div>
                     <Select
-                      value={form.categoryId}
-                      onValueChange={(value) => setForm({ ...form, categoryId: (value as string) ?? '' })}
+                      value={form.categoryId || ""}
+                      onValueChange={(v) => v && v !== "_none" && setForm({ ...form, categoryId: v })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
+                        <SelectValue placeholder="Select category">
+                          {form.categoryId && categories?.find(c => c._id === form.categoryId)?.name}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {categories?.map((cat) => (
@@ -218,27 +310,42 @@ function ProductsPage() {
                             {cat.name}
                           </SelectItem>
                         ))}
+                        {(!categories || categories.length === 0) && (
+                          <SelectItem value="_none" disabled>
+                            No categories - click New to add
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="unit">Unit *</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="unit">Unit *</Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs text-teal-600 hover:text-teal-700 px-2"
+                        onClick={() => setQuickUnitOpen(true)}
+                      >
+                        <Ruler className="mr-1 h-3 w-3" />
+                        New
+                      </Button>
+                    </div>
                     <Select
                       value={form.unit}
-                      onValueChange={(value) => setForm({ ...form, unit: (value as string) ?? '' })}
+                      onValueChange={(v) => v && setForm({ ...form, unit: v })}
+                      required
                     >
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue placeholder="Select unit" />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tablet">Tablet</SelectItem>
-                        <SelectItem value="bottle">Bottle</SelectItem>
-                        <SelectItem value="box">Box</SelectItem>
-                        <SelectItem value="vial">Vial</SelectItem>
-                        <SelectItem value="ampoule">Ampoule</SelectItem>
-                        <SelectItem value="tube">Tube</SelectItem>
-                        <SelectItem value="sachet">Sachet</SelectItem>
-                        <SelectItem value="piece">Piece</SelectItem>
+                      <SelectContent className="max-h-60">
+                        {allUnits.map((unit) => (
+                          <SelectItem key={unit.value} value={unit.value}>
+                            {unit.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -340,7 +447,7 @@ function ProductsPage() {
                     <TableCell className="font-mono text-sm">{product.sku}</TableCell>
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell>{getCategoryName(product.categoryId)}</TableCell>
-                    <TableCell>{product.unit}</TableCell>
+                    <TableCell>{getUnitLabel(product.unit)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(product.purchasePrice)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(product.salePrice)}</TableCell>
                     <TableCell className="text-center">
@@ -400,6 +507,75 @@ function ProductsPage() {
             <Button variant="destructive" onClick={handleDelete}>
               Delete
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Category Dialog */}
+      <Dialog open={quickCategoryOpen} onOpenChange={setQuickCategoryOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderPlus className="h-5 w-5 text-teal-600" />
+              Quick Add Category
+            </DialogTitle>
+            <DialogDescription>
+              Create a new product category.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="categoryName">Category Name *</Label>
+              <Input
+                id="categoryName"
+                value={quickCategoryName}
+                onChange={(e) => setQuickCategoryName(e.target.value)}
+                placeholder="e.g., Antibiotics, Pain Relief"
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleQuickAddCategory())}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickCategoryOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleQuickAddCategory}>Create Category</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Unit Dialog */}
+      <Dialog open={quickUnitOpen} onOpenChange={setQuickUnitOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Ruler className="h-5 w-5 text-teal-600" />
+              Add New Unit
+            </DialogTitle>
+            <DialogDescription>
+              Add a custom unit of measurement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="unitName">Unit Name *</Label>
+              <Input
+                id="unitName"
+                value={newUnitName}
+                onChange={(e) => setNewUnitName(e.target.value)}
+                placeholder="e.g., Sachet, Strip, Blister"
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleQuickAddUnit())}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This unit will be available for all products in this session.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickUnitOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleQuickAddUnit}>Add Unit</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

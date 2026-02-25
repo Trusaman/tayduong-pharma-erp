@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as categories from "../categories.js";
 import type * as customers from "../customers.js";
 import type * as dashboard from "../dashboard.js";
+import type * as discounts from "../discounts.js";
 import type * as healthCheck from "../healthCheck.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
@@ -19,7 +20,9 @@ import type * as privateData from "../privateData.js";
 import type * as products from "../products.js";
 import type * as purchaseOrders from "../purchaseOrders.js";
 import type * as salesOrders from "../salesOrders.js";
+import type * as salesmen from "../salesmen.js";
 import type * as suppliers from "../suppliers.js";
+import type * as units from "../units.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   categories: typeof categories;
   customers: typeof customers;
   dashboard: typeof dashboard;
+  discounts: typeof discounts;
   healthCheck: typeof healthCheck;
   http: typeof http;
   inventory: typeof inventory;
@@ -39,7 +43,9 @@ declare const fullApi: ApiFromModules<{
   products: typeof products;
   purchaseOrders: typeof purchaseOrders;
   salesOrders: typeof salesOrders;
+  salesmen: typeof salesmen;
   suppliers: typeof suppliers;
+  units: typeof units;
 }>;
 
 /**

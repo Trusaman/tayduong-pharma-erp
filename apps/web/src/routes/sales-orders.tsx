@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
+import type { Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import {
@@ -61,15 +62,30 @@ function SalesOrdersPage() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState("");
+  const [salesmanId, setSalesmanId] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<OrderItem[]>([initialItem]);
 
   const orders = useQuery(api.salesOrders.listWithCustomers, {});
   const customers = useQuery(api.customers.list, { activeOnly: true });
+  const salesmen = useQuery(api.salesmen.list, { activeOnly: true });
   const products = useQuery(api.products.list, { activeOnly: true });
+  const selectedProductIds = Array.from(
+    new Set(items.map((item) => item.productId).filter(Boolean))
+  ) as Id<"products">[];
+  const applicableDiscounts = useQuery(
+    api.discounts.getApplicableForOrder,
+    customerId && salesmanId && selectedProductIds.length > 0
+      ? {
+          customerId: customerId as Id<"customers">,
+          salesmanId: salesmanId as Id<"salesmen">,
+          productIds: selectedProductIds,
+        }
+      : "skip"
+  );
   const orderDetails = useQuery(
     api.salesOrders.getWithDetails,
-    selectedOrderId ? { id: selectedOrderId as any } : "skip"
+    selectedOrderId ? { id: selectedOrderId as Id<"salesOrders"> } : "skip"
   );
 
   const createOrder = useMutation(api.salesOrders.create);
@@ -108,42 +124,47 @@ function SalesOrdersPage() {
       }
 
       await createOrder({
-        customerId: customerId as any,
+        customerId: customerId as Id<"customers">,
+        salesmanId: salesmanId ? (salesmanId as Id<"salesmen">) : undefined,
         items: validItems.map((item) => ({
-          productId: item.productId as any,
-          quantity: parseInt(item.quantity),
-          unitPrice: parseFloat(item.unitPrice),
+          productId: item.productId as Id<"products">,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
         })),
         notes: notes || undefined,
       });
       toast.success("Sales order created successfully");
       setCreateDialogOpen(false);
       resetForm();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to create order");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create order");
     }
   };
 
-  const handleStatusChange = async (orderId: string, status: string) => {
+  const handleStatusChange = async (
+    orderId: string,
+    status: "draft" | "pending" | "partial" | "completed" | "cancelled"
+  ) => {
     try {
-      await updateStatus({ id: orderId as any, status: status as any });
+      await updateStatus({ id: orderId as Id<"salesOrders">, status });
       toast.success("Order status updated");
-    } catch (error: any) {
-      toast.error(error.message || "Failed to update status");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update status");
     }
   };
 
   const handleDelete = async (orderId: string) => {
     try {
-      await deleteOrder({ id: orderId as any });
+      await deleteOrder({ id: orderId as Id<"salesOrders"> });
       toast.success("Order deleted successfully");
-    } catch (error: any) {
-      toast.error(error.message || "Failed to delete order");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete order");
     }
   };
 
   const resetForm = () => {
     setCustomerId("");
+    setSalesmanId("");
     setNotes("");
     setItems([initialItem]);
   };
@@ -204,20 +225,37 @@ function SalesOrdersPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
-                <div className="space-y-2">
-                  <Label>Customer *</Label>
-                  <Select value={customerId} onValueChange={(v) => v && setCustomerId(v)} required>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers?.map((c) => (
-                        <SelectItem key={c._id} value={c._id}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Customer *</Label>
+                    <Select value={customerId} onValueChange={(v) => v && setCustomerId(v)} required>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select customer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customers?.map((c) => (
+                          <SelectItem key={c._id} value={c._id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Salesman *</Label>
+                    <Select value={salesmanId} onValueChange={(v) => v && setSalesmanId(v)} required>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select salesman" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {salesmen?.map((s) => (
+                          <SelectItem key={s._id} value={s._id}>
+                            {s.name} ({s.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -259,12 +297,20 @@ function SalesOrdersPage() {
                       <div className="col-span-4">
                         <Input
                           type="number"
-                          placeholder="Unit Price"
+                          placeholder="Base Unit Price"
                           value={item.unitPrice}
                           onChange={(e) => handleItemChange(index, "unitPrice", e.target.value)}
                           className="h-9"
                           min="0"
                         />
+                        {item.productId && item.unitPrice && applicableDiscounts?.[item.productId] && (
+                          <p className="mt-1 text-xs text-teal-700">
+                            Discount: {applicableDiscounts[item.productId].totalPercent}% → Effective: {formatCurrency(
+                              Number(item.unitPrice) *
+                                (1 - applicableDiscounts[item.productId].totalPercent / 100)
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className="col-span-1">
                         <Button
@@ -328,8 +374,10 @@ function SalesOrdersPage() {
                 <TableRow>
                   <TableHead>Order #</TableHead>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Salesman</TableHead>
                   <TableHead>Order Date</TableHead>
                   <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Discount</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -339,8 +387,12 @@ function SalesOrdersPage() {
                   <TableRow key={order._id}>
                     <TableCell className="font-mono">{order.orderNumber}</TableCell>
                     <TableCell>{order.customer?.name || "-"}</TableCell>
+                    <TableCell>{order.salesman?.name || "-"}</TableCell>
                     <TableCell>{formatDate(order.orderDate)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(order.totalAmount)}</TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrency(order.totalDiscountAmount || 0)}
+                    </TableCell>
                     <TableCell className="text-center">{getStatusBadge(order.status)}</TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -404,12 +456,22 @@ function SalesOrdersPage() {
                   {getStatusBadge(orderDetails.status)}
                 </div>
                 <div>
+                  <p className="text-sm text-muted-foreground">Salesman</p>
+                  <p className="font-medium">{orderDetails.salesman?.name || "-"}</p>
+                </div>
+                <div>
                   <p className="text-sm text-muted-foreground">Order Date</p>
                   <p>{formatDate(orderDetails.orderDate)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total Amount</p>
                   <p className="font-bold">{formatCurrency(orderDetails.totalAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Discount</p>
+                  <p className="font-bold text-teal-700">
+                    {formatCurrency(orderDetails.totalDiscountAmount || 0)}
+                  </p>
                 </div>
               </div>
 
@@ -428,16 +490,26 @@ function SalesOrdersPage() {
                       <TableHead>Product</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Fulfilled</TableHead>
+                      <TableHead className="text-right">Base Price</TableHead>
+                      <TableHead className="text-right">Discount %</TableHead>
+                      <TableHead className="text-right">Discount</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {orderDetails.items?.map((item: any) => (
+                    {orderDetails.items?.map((item) => (
                       <TableRow key={item._id}>
                         <TableCell>{item.product?.name}</TableCell>
                         <TableCell className="text-right">{item.quantity}</TableCell>
                         <TableCell className="text-right">{item.fulfilledQuantity || 0}</TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(item.baseUnitPrice ?? item.unitPrice)}
+                        </TableCell>
+                        <TableCell className="text-right">{item.discountPercent ?? 0}%</TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(item.discountAmount ?? 0)}
+                        </TableCell>
                         <TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(item.quantity * item.unitPrice)}

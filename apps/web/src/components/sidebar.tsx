@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   ClipboardList,
   FileBarChart,
+  BadgePercent,
   ChevronLeft,
   Menu,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const navigation = [
   { name: "Customers", href: "/customers", icon: UserCircle },
   { name: "Purchase Orders", href: "/purchase-orders", icon: ShoppingCart },
   { name: "Sales Orders", href: "/sales-orders", icon: ClipboardList },
+  { name: "Discounts", href: "/discounts", icon: BadgePercent },
   { name: "Reports", href: "/reports", icon: FileBarChart },
 ];
 

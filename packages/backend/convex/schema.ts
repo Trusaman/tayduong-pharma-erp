@@ -10,6 +10,14 @@ export default defineSchema({
     updatedAt: v.number(),
   }),
 
+  // Custom Units
+  units: defineTable({
+    name: v.string(),
+    value: v.string(), // lowercase value used in products
+    createdAt: v.number(),
+  })
+    .index("by_value", ["value"]),
+
   // Products/Medicines
   products: defineTable({
     name: v.string(),
@@ -60,6 +68,44 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_code", ["code"])
+    .index("by_active", ["isActive"]),
+
+  // Salesmen
+  salesmen: defineTable({
+    name: v.string(),
+    code: v.string(),
+    phone: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_code", ["code"])
+    .index("by_active", ["isActive"]),
+
+  // Discount Rules
+  discountRules: defineTable({
+    name: v.string(),
+    discountType: v.union(
+      v.literal("Doctor"),
+      v.literal("hospital"),
+      v.literal("payment"),
+      v.literal("Salesman"),
+      v.literal("Manager")
+    ),
+    customerId: v.optional(v.id("customers")),
+    productId: v.optional(v.id("products")),
+    salesmanId: v.id("salesmen"),
+    discountPercent: v.number(),
+    createdByStaff: v.string(),
+    notes: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_salesman", ["salesmanId"])
+    .index("by_customer", ["customerId"])
+    .index("by_product", ["productId"])
     .index("by_active", ["isActive"]),
 
   // Inventory Batches
@@ -118,6 +164,7 @@ export default defineSchema({
   salesOrders: defineTable({
     orderNumber: v.string(),
     customerId: v.id("customers"),
+    salesmanId: v.optional(v.id("salesmen")),
     status: v.union(
       v.literal("draft"),
       v.literal("pending"),
@@ -126,6 +173,7 @@ export default defineSchema({
       v.literal("cancelled")
     ),
     totalAmount: v.number(),
+    totalDiscountAmount: v.optional(v.number()),
     notes: v.optional(v.string()),
     orderDate: v.number(),
     createdAt: v.number(),
@@ -133,6 +181,7 @@ export default defineSchema({
   })
     .index("by_orderNumber", ["orderNumber"])
     .index("by_customer", ["customerId"])
+    .index("by_salesman", ["salesmanId"])
     .index("by_status", ["status"]),
 
   // Sales Order Items
@@ -140,7 +189,11 @@ export default defineSchema({
     salesOrderId: v.id("salesOrders"),
     productId: v.id("products"),
     quantity: v.number(),
+    baseUnitPrice: v.optional(v.number()),
     unitPrice: v.number(),
+    discountPercent: v.optional(v.number()),
+    discountAmount: v.optional(v.number()),
+    appliedDiscountTypes: v.optional(v.array(v.string())),
     fulfilledQuantity: v.number(),
     createdAt: v.number(),
   })

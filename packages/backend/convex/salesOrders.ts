@@ -55,6 +55,7 @@ export const getWithDetails = query({
     if (!order) return null;
 
     const customer = await ctx.db.get(order.customerId);
+    const salesman = order.salesmanId ? await ctx.db.get(order.salesmanId) : null;
 
     const items = await ctx.db
       .query("salesOrderItems")
@@ -71,6 +72,7 @@ export const getWithDetails = query({
     return {
       ...order,
       customer,
+      salesman,
       items: itemsWithProducts,
     };
   },
@@ -85,7 +87,8 @@ export const listWithCustomers = query({
     return await Promise.all(
       orders.map(async (order) => {
         const customer = await ctx.db.get(order.customerId);
-        return { ...order, customer };
+        const salesman = order.salesmanId ? await ctx.db.get(order.salesmanId) : null;
+        return { ...order, customer, salesman };
       })
     );
   },
@@ -94,6 +97,7 @@ export const listWithCustomers = query({
 export const create = mutation({
   args: {
     customerId: v.id("customers"),
+    salesmanId: v.optional(v.id("salesmen")),
     items: v.array(
       v.object({
         productId: v.id("products"),
@@ -107,17 +111,66 @@ export const create = mutation({
     const now = Date.now();
     const orderNumber = await generateOrderNumber(ctx);
 
-    // Calculate total
-    const totalAmount = args.items.reduce(
+    let discountRules: Array<{
+      _id: unknown;
+      name: string;
+      discountType: string;
+      customerId?: unknown;
+      productId?: unknown;
+      discountPercent: number;
+      isActive: boolean;
+    }> = [];
+
+    if (args.salesmanId) {
+      discountRules = await ctx.db
+        .query("discountRules")
+        .withIndex("by_salesman", (q) => q.eq("salesmanId", args.salesmanId!))
+        .filter((q) => q.eq(q.field("isActive"), true))
+        .collect();
+    }
+
+    const preparedItems = args.items.map((item) => {
+      const matched = discountRules.filter((rule) => {
+        const customerMatch = !rule.customerId || rule.customerId === args.customerId;
+        const productMatch = !rule.productId || rule.productId === item.productId;
+        return customerMatch && productMatch;
+      });
+
+      const discountPercent = Math.min(
+        100,
+        matched.reduce((sum, rule) => sum + rule.discountPercent, 0)
+      );
+
+      const baseUnitPrice = item.unitPrice;
+      const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
+      const discountAmount = item.quantity * (baseUnitPrice - discountedUnitPrice);
+
+      return {
+        ...item,
+        baseUnitPrice,
+        unitPrice: discountedUnitPrice,
+        discountPercent,
+        discountAmount,
+        appliedDiscountTypes: matched.map((rule) => rule.discountType),
+      };
+    });
+
+    const totalAmount = preparedItems.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
+      0
+    );
+    const totalDiscountAmount = preparedItems.reduce(
+      (sum, item) => sum + item.discountAmount,
       0
     );
 
     const orderId = await ctx.db.insert("salesOrders", {
       orderNumber,
       customerId: args.customerId,
+      salesmanId: args.salesmanId,
       status: "draft",
       totalAmount,
+      totalDiscountAmount,
       notes: args.notes,
       orderDate: now,
       createdAt: now,
@@ -125,12 +178,16 @@ export const create = mutation({
     });
 
     // Insert items
-    for (const item of args.items) {
+    for (const item of preparedItems) {
       await ctx.db.insert("salesOrderItems", {
         salesOrderId: orderId,
         productId: item.productId,
         quantity: item.quantity,
+        baseUnitPrice: item.baseUnitPrice,
         unitPrice: item.unitPrice,
+        discountPercent: item.discountPercent,
+        discountAmount: item.discountAmount,
+        appliedDiscountTypes: item.appliedDiscountTypes,
         fulfilledQuantity: 0,
         createdAt: now,
       });
