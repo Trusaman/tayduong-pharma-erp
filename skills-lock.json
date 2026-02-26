@@ -1,75 +1,75 @@
 {
-  "version": 1,
-  "skills": {
-    "better-auth-best-practices": {
-      "source": "better-auth/skills",
-      "sourceType": "github",
-      "computedHash": "ae9bd37665a525bdb056ff6f27afc0f9c7c75809e3e23ed85c0d398dd10f6a96"
-    },
-    "convex-best-practices": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "1e0008cecaa0bca3b0e1aa8c31a7f59417907088cd9309402739e71f249287c2"
-    },
-    "convex-cron-jobs": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "a5a20d9691efaf97a6b54da22514116533983e5db0a38a902c89526fa11be792"
-    },
-    "convex-file-storage": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "e16eef2a7d57532ceeb4b696b072a3638b1c9e047544a1312796abd3554c3ac0"
-    },
-    "convex-functions": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "0238fad9b9a141dc0fe75baf0eb937f650a9b7d1044e86dbd25f5da7c56cb027"
-    },
-    "convex-http-actions": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "8eb466bc8f89d027b06dc26a935cf57398b5317fc742750e482965a17ab4801c"
-    },
-    "convex-migrations": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "4235e7f09a49d190c8d0cf6aec8c86778364363fd7b3fb4b94fb05ac0a2c7303"
-    },
-    "convex-realtime": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "72d0500e41f7f8a158c65a9873feef0eb57e93fbccd551f562e8a37117d3f5f1"
-    },
-    "convex-schema-validator": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "5ea368133caa4b5ff39b5c3f404de2c63501a03d3d2af3ec3e4cda2876ec7ecc"
-    },
-    "convex-security-check": {
-      "source": "waynesutton/convexskills",
-      "sourceType": "github",
-      "computedHash": "229853d175a525e3a6304eeef51cb429c70586fb2f99283e4147505bbb848229"
-    },
-    "turborepo": {
-      "source": "vercel/turborepo",
-      "sourceType": "github",
-      "computedHash": "16115d4a30ee09162d2077315ac921903d4498fe4cc85a3f934d5f50f2eb4273"
-    },
-    "vercel-composition-patterns": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "computedHash": "10eb4ec94577b79ae98c63ce3e7f35f8a6a06436a4011bff083b397de6960eeb"
-    },
-    "vercel-react-best-practices": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "computedHash": "61f8c307aa8ce0c4c52da8886d42e344dab83f76f9b5360cf8923b25fb1d67bb"
-    },
-    "web-design-guidelines": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "computedHash": "d8e7d3afe37dcc8a97b99ffb5afdb4d0919ae0092ea8b68f44eb201f035e33ac"
-    }
-  }
+	"version": 1,
+	"skills": {
+		"better-auth-best-practices": {
+			"source": "better-auth/skills",
+			"sourceType": "github",
+			"computedHash": "ae9bd37665a525bdb056ff6f27afc0f9c7c75809e3e23ed85c0d398dd10f6a96"
+		},
+		"convex-best-practices": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "1e0008cecaa0bca3b0e1aa8c31a7f59417907088cd9309402739e71f249287c2"
+		},
+		"convex-cron-jobs": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "a5a20d9691efaf97a6b54da22514116533983e5db0a38a902c89526fa11be792"
+		},
+		"convex-file-storage": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "e16eef2a7d57532ceeb4b696b072a3638b1c9e047544a1312796abd3554c3ac0"
+		},
+		"convex-functions": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "0238fad9b9a141dc0fe75baf0eb937f650a9b7d1044e86dbd25f5da7c56cb027"
+		},
+		"convex-http-actions": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "8eb466bc8f89d027b06dc26a935cf57398b5317fc742750e482965a17ab4801c"
+		},
+		"convex-migrations": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "4235e7f09a49d190c8d0cf6aec8c86778364363fd7b3fb4b94fb05ac0a2c7303"
+		},
+		"convex-realtime": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "72d0500e41f7f8a158c65a9873feef0eb57e93fbccd551f562e8a37117d3f5f1"
+		},
+		"convex-schema-validator": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "5ea368133caa4b5ff39b5c3f404de2c63501a03d3d2af3ec3e4cda2876ec7ecc"
+		},
+		"convex-security-check": {
+			"source": "waynesutton/convexskills",
+			"sourceType": "github",
+			"computedHash": "229853d175a525e3a6304eeef51cb429c70586fb2f99283e4147505bbb848229"
+		},
+		"turborepo": {
+			"source": "vercel/turborepo",
+			"sourceType": "github",
+			"computedHash": "16115d4a30ee09162d2077315ac921903d4498fe4cc85a3f934d5f50f2eb4273"
+		},
+		"vercel-composition-patterns": {
+			"source": "vercel-labs/agent-skills",
+			"sourceType": "github",
+			"computedHash": "10eb4ec94577b79ae98c63ce3e7f35f8a6a06436a4011bff083b397de6960eeb"
+		},
+		"vercel-react-best-practices": {
+			"source": "vercel-labs/agent-skills",
+			"sourceType": "github",
+			"computedHash": "61f8c307aa8ce0c4c52da8886d42e344dab83f76f9b5360cf8923b25fb1d67bb"
+		},
+		"web-design-guidelines": {
+			"source": "vercel-labs/agent-skills",
+			"sourceType": "github",
+			"computedHash": "d8e7d3afe37dcc8a97b99ffb5afdb4d0919ae0092ea8b68f44eb201f035e33ac"
+		}
+	}
 }
