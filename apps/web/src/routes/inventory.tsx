@@ -62,7 +62,7 @@ const IMPORT_TYPES = [
 const EXPORT_TYPES = [
 	{ value: "export", label: "Xuất bán hàng" },
 	{ value: "export_return", label: "Xuất trả NCC" },
-	{ value: "export_gift", label: "Xuất tặng/biển tặng" },
+	{ value: "export_gift", label: "Xuất tặng/khuyến mại/hàng mẫu" },
 	{ value: "export_destruction", label: "Xuất hủy" },
 ];
 
@@ -203,6 +203,34 @@ function InventoryPage() {
 	const customUnits = useQuery(api.units.list);
 	const lowStock = useQuery(api.inventory.getLowStock, {});
 	const expiring = useQuery(api.inventory.getExpiring, { withinDays: 30 });
+
+	// Options for selects (used to build consistent labels)
+	const productOptions =
+		products?.map((p) => ({
+			value: p._id,
+			label: p.sku ? `${p.sku} - ${p.name}` : p.name,
+		})) ?? [];
+
+	const customerOptions =
+		customers?.map((c) => ({
+			value: c._id,
+			label: c.code ? `${c.code} - ${c.name}` : c.name,
+		})) ?? [];
+
+	const supplierOptions =
+		suppliers?.map((s) => ({
+			value: s._id,
+			label: s.code ? `${s.code} - ${s.name}` : s.name,
+		})) ?? [];
+
+	const getProductLabel = (id: string) =>
+		productOptions.find((p) => p.value === id)?.label ?? "";
+
+	const getCustomerLabel = (id: string) =>
+		customerOptions.find((c) => c.value === id)?.label ?? "";
+
+	const getSupplierLabel = (id: string) =>
+		supplierOptions.find((s) => s.value === id)?.label ?? "";
 
 	// Queries - Stock Transfers
 	const importTransfers = useQuery(api.stockTransfers.listWithPartners, {
@@ -648,12 +676,18 @@ function InventoryPage() {
 												required
 											>
 												<SelectTrigger>
-													<SelectValue placeholder="Chọn sản phẩm" />
+													{form.productId ? (
+														getProductLabel(form.productId)
+													) : (
+														<span className="text-muted-foreground">
+															Chọn sản phẩm
+														</span>
+													)}
 												</SelectTrigger>
 												<SelectContent>
-													{products?.map((p) => (
-														<SelectItem key={p._id} value={p._id}>
-															{p.sku ? `${p.sku} - ${p.name}` : p.name}
+													{productOptions.map((p) => (
+														<SelectItem key={p.value} value={p.value}>
+															{p.label}
 														</SelectItem>
 													))}
 												</SelectContent>
@@ -728,12 +762,18 @@ function InventoryPage() {
 													}
 												>
 													<SelectTrigger>
-														<SelectValue placeholder="Chọn nhà cung cấp" />
+														{form.supplierId ? (
+															getSupplierLabel(form.supplierId)
+														) : (
+															<span className="text-muted-foreground">
+																Chọn nhà cung cấp
+															</span>
+														)}
 													</SelectTrigger>
 													<SelectContent>
-														{suppliers?.map((s) => (
-															<SelectItem key={s._id} value={s._id}>
-																{s.code ? `${s.code} - ${s.name}` : s.name}
+														{supplierOptions.map((s) => (
+															<SelectItem key={s.value} value={s.value}>
+																{s.label}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -1324,26 +1364,32 @@ function InventoryPage() {
 										}
 									>
 										<SelectTrigger>
-											<SelectValue
-												placeholder={
-													transferForm.transferType === "import_return"
+											{transferForm.partnerId ? (
+												transferForm.transferType === "import_return" ? (
+													getCustomerLabel(transferForm.partnerId)
+												) : (
+													getSupplierLabel(transferForm.partnerId)
+												)
+											) : (
+												<span className="text-muted-foreground">
+													{transferForm.transferType === "import_return"
 														? "Chọn khách hàng"
-														: "Chọn nhà cung cấp"
-												}
-											/>
+														: "Chọn nhà cung cấp"}
+												</span>
+											)}
 										</SelectTrigger>
 										<SelectContent>
 											{transferForm.transferType === "import_return"
-												? customers?.map((c) => (
-														<SelectItem key={c._id} value={c._id}>
-														{c.code ? `${c.code} - ${c.name}` : c.name}
-														</SelectItem>
-													))
-												: suppliers?.map((s) => (
-														<SelectItem key={s._id} value={s._id}>
-														{s.code ? `${s.code} - ${s.name}` : s.name}
-														</SelectItem>
-													))}
+													? customerOptions.map((c) => (
+															<SelectItem key={c.value} value={c.value}>
+																{c.label}
+															</SelectItem>
+														))
+													: supplierOptions.map((s) => (
+															<SelectItem key={s.value} value={s.value}>
+																{s.label}
+															</SelectItem>
+														))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -1402,12 +1448,18 @@ function InventoryPage() {
 													}
 												>
 													<SelectTrigger className="mt-1 h-9">
-														<SelectValue placeholder="Chọn SP" />
+														{item.productId ? (
+															<span>{getProductLabel(item.productId)}</span>
+														) : (
+															<span className="text-muted-foreground text-xs">
+																Chọn SP
+															</span>
+														)}
 													</SelectTrigger>
 													<SelectContent>
-														{products?.map((p) => (
-															<SelectItem key={p._id} value={p._id}>
-																{p.sku ? `${p.sku} - ${p.name}` : p.name}
+														{productOptions.map((p) => (
+															<SelectItem key={p.value} value={p.value}>
+																{p.label}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -1559,28 +1611,36 @@ function InventoryPage() {
 										}
 									>
 										<SelectTrigger>
-											<SelectValue
-												placeholder={
-													["export_return", "export_destruction"].includes(
+											{transferForm.partnerId ? (
+												["export_return", "export_destruction"].includes(
+													transferForm.transferType,
+												) ? (
+													getSupplierLabel(transferForm.partnerId)
+												) : (
+													getCustomerLabel(transferForm.partnerId)
+												)
+											) : (
+												<span className="text-muted-foreground">
+													{["export_return", "export_destruction"].includes(
 														transferForm.transferType,
 													)
 														? "Chọn nhà cung cấp"
-														: "Chọn khách hàng"
-												}
-											/>
+														: "Chọn khách hàng"}
+												</span>
+											)}
 										</SelectTrigger>
 										<SelectContent>
 											{["export_return", "export_destruction"].includes(
 												transferForm.transferType,
 											)
-												? suppliers?.map((s) => (
-														<SelectItem key={s._id} value={s._id}>
-															{s.code ? `${s.code} - ${s.name}` : s.name}
+												? supplierOptions.map((s) => (
+														<SelectItem key={s.value} value={s.value}>
+															{s.label}
 														</SelectItem>
 													))
-												: customers?.map((c) => (
-														<SelectItem key={c._id} value={c._id}>
-															{c.code ? `${c.code} - ${c.name}` : c.name}
+												: customerOptions.map((c) => (
+														<SelectItem key={c.value} value={c.value}>
+															{c.label}
 														</SelectItem>
 													))}
 										</SelectContent>
@@ -1644,12 +1704,18 @@ function InventoryPage() {
 													}
 												>
 													<SelectTrigger className="mt-1 h-9">
-														<SelectValue placeholder="Chọn SP" />
+														{item.productId ? (
+															<span>{getProductLabel(item.productId)}</span>
+														) : (
+															<span className="text-muted-foreground text-xs">
+																Chọn SP
+															</span>
+														)}
 													</SelectTrigger>
 													<SelectContent>
-														{products?.map((p) => (
-															<SelectItem key={p._id} value={p._id}>
-																{p.sku ? `${p.sku} - ${p.name}` : p.name}
+														{productOptions.map((p) => (
+															<SelectItem key={p.value} value={p.value}>
+																{p.label}
 															</SelectItem>
 														))}
 													</SelectContent>
