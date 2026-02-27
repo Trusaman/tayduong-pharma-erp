@@ -1380,16 +1380,16 @@ function InventoryPage() {
 										</SelectTrigger>
 										<SelectContent>
 											{transferForm.transferType === "import_return"
-													? customerOptions.map((c) => (
-															<SelectItem key={c.value} value={c.value}>
-																{c.label}
-															</SelectItem>
-														))
-													: supplierOptions.map((s) => (
-															<SelectItem key={s.value} value={s.value}>
-																{s.label}
-															</SelectItem>
-														))}
+												? customerOptions.map((c) => (
+													<SelectItem key={c.value} value={c.value}>
+														{c.label}
+													</SelectItem>
+												))
+												: supplierOptions.map((s) => (
+													<SelectItem key={s.value} value={s.value}>
+														{s.label}
+													</SelectItem>
+												))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -1585,7 +1585,15 @@ function InventoryPage() {
 										required
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Chọn loại phiếu" />
+											{transferForm.transferType ? (
+												<span>
+													{EXPORT_TYPES.find(
+														(t) => t.value === transferForm.transferType,
+													)?.label}
+												</span>
+											) : (
+												<span className="text-muted-foreground">Chọn loại phiếu</span>
+											)}
 										</SelectTrigger>
 										<SelectContent>
 											{EXPORT_TYPES.map((type) => (
@@ -1634,15 +1642,15 @@ function InventoryPage() {
 												transferForm.transferType,
 											)
 												? supplierOptions.map((s) => (
-														<SelectItem key={s.value} value={s.value}>
-															{s.label}
-														</SelectItem>
-													))
+													<SelectItem key={s.value} value={s.value}>
+														{s.label}
+													</SelectItem>
+												))
 												: customerOptions.map((c) => (
-														<SelectItem key={c.value} value={c.value}>
-															{c.label}
-														</SelectItem>
-													))}
+													<SelectItem key={c.value} value={c.value}>
+														{c.label}
+													</SelectItem>
+												))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -1732,15 +1740,28 @@ function InventoryPage() {
 													disabled={!item.productId}
 												>
 													<SelectTrigger className="mt-1 h-9">
-														<SelectValue placeholder="Chọn lô" />
+														{item.inventoryId ? (
+															(() => {
+																const inv = availableInventory?.find(
+																	(i) => i._id === item.inventoryId,
+																);
+																return inv ? (
+																	<span>{inv.batchNumber} (SL: {inv.quantity})</span>
+																) : (
+																	<span className="text-muted-foreground text-xs">Chọn lô</span>
+																);
+															})()
+														) : (
+															<span className="text-muted-foreground text-xs">Chọn lô</span>
+														)}
 													</SelectTrigger>
 													<SelectContent>
 														{item.productId === selectedProductIdForInventory
 															? availableInventory?.map((inv) => (
-																	<SelectItem key={inv._id} value={inv._id}>
-																		{inv.batchNumber} (SL: {inv.quantity})
-																	</SelectItem>
-																))
+																<SelectItem key={inv._id} value={inv._id}>
+																	{inv.batchNumber} (SL: {inv.quantity})
+																</SelectItem>
+															))
 															: null}
 													</SelectContent>
 												</Select>
