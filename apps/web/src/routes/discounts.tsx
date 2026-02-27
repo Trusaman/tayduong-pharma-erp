@@ -503,7 +503,7 @@ function DiscountsPage() {
 														<SelectContent>
 															{salesmen?.map((s) => (
 																<SelectItem key={s._id} value={s._id}>
-																	{s.name} ({s.code})
+																	{s.name}
 																</SelectItem>
 															))}
 														</SelectContent>

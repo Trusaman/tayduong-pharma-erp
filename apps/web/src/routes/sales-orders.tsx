@@ -283,7 +283,7 @@ function SalesOrdersPage() {
 											<SelectContent>
 												{salesmen?.map((s) => (
 													<SelectItem key={s._id} value={s._id}>
-														{s.name} ({s.code})
+														{s.name}
 													</SelectItem>
 												))}
 											</SelectContent>
@@ -315,7 +315,7 @@ function SalesOrdersPage() {
 														v && handleItemChange(index, "productId", v)
 													}
 												>
-													<SelectTrigger className="h-9">
+													<SelectTrigger className="h-10">
 														<SelectValue placeholder="Sản phẩm" />
 													</SelectTrigger>
 													<SelectContent>
@@ -335,7 +335,7 @@ function SalesOrdersPage() {
 													onChange={(e) =>
 														handleItemChange(index, "quantity", e.target.value)
 													}
-													className="h-9"
+													className="h-10"
 													min="1"
 												/>
 											</div>
@@ -347,7 +347,7 @@ function SalesOrdersPage() {
 													onChange={(e) =>
 														handleItemChange(index, "unitPrice", e.target.value)
 													}
-													className="h-9"
+													className="h-10"
 													min="0"
 												/>
 												{item.productId &&
@@ -372,7 +372,7 @@ function SalesOrdersPage() {
 													type="button"
 													variant="ghost"
 													size="icon"
-													className="h-9"
+													className="h-10"
 													onClick={() => handleRemoveItem(index)}
 													disabled={items.length === 1}
 												>

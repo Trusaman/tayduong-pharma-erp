@@ -653,7 +653,7 @@ function InventoryPage() {
 												<SelectContent>
 													{products?.map((p) => (
 														<SelectItem key={p._id} value={p._id}>
-															{p.name} ({p.sku})
+															{p.sku ? `${p.sku} - ${p.name}` : p.name}
 														</SelectItem>
 													))}
 												</SelectContent>
@@ -733,7 +733,7 @@ function InventoryPage() {
 													<SelectContent>
 														{suppliers?.map((s) => (
 															<SelectItem key={s._id} value={s._id}>
-																{s.name}
+																{s.code ? `${s.code} - ${s.name}` : s.name}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -1336,12 +1336,12 @@ function InventoryPage() {
 											{transferForm.transferType === "import_return"
 												? customers?.map((c) => (
 														<SelectItem key={c._id} value={c._id}>
-															{c.name}
+														{c.code ? `${c.code} - ${c.name}` : c.name}
 														</SelectItem>
 													))
 												: suppliers?.map((s) => (
 														<SelectItem key={s._id} value={s._id}>
-															{s.name}
+														{s.code ? `${s.code} - ${s.name}` : s.name}
 														</SelectItem>
 													))}
 										</SelectContent>
@@ -1407,7 +1407,7 @@ function InventoryPage() {
 													<SelectContent>
 														{products?.map((p) => (
 															<SelectItem key={p._id} value={p._id}>
-																{p.name}
+																{p.sku ? `${p.sku} - ${p.name}` : p.name}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -1482,7 +1482,7 @@ function InventoryPage() {
 													type="button"
 													variant="ghost"
 													size="icon"
-													className="h-9"
+													className="h-10"
 													onClick={() => handleRemoveTransferItem(index)}
 													disabled={transferForm.items.length === 1}
 												>
@@ -1575,12 +1575,12 @@ function InventoryPage() {
 											)
 												? suppliers?.map((s) => (
 														<SelectItem key={s._id} value={s._id}>
-															{s.name}
+															{s.code ? `${s.code} - ${s.name}` : s.name}
 														</SelectItem>
 													))
 												: customers?.map((c) => (
 														<SelectItem key={c._id} value={c._id}>
-															{c.name}
+															{c.code ? `${c.code} - ${c.name}` : c.name}
 														</SelectItem>
 													))}
 										</SelectContent>
@@ -1649,7 +1649,7 @@ function InventoryPage() {
 													<SelectContent>
 														{products?.map((p) => (
 															<SelectItem key={p._id} value={p._id}>
-																{p.name}
+																{p.sku ? `${p.sku} - ${p.name}` : p.name}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -1726,7 +1726,7 @@ function InventoryPage() {
 													type="button"
 													variant="ghost"
 													size="icon"
-													className="h-9"
+													className="h-10"
 													onClick={() => handleRemoveTransferItem(index)}
 													disabled={transferForm.items.length === 1}
 												>

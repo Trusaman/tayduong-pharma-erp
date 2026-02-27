@@ -401,13 +401,13 @@ function PurchaseOrdersPage() {
 														v && handleItemChange(index, "productId", v)
 													}
 												>
-													<SelectTrigger className="h-9">
+													<SelectTrigger className="h-10">
 														<SelectValue placeholder="Sản phẩm" />
 													</SelectTrigger>
 													<SelectContent>
 														{products?.map((p) => (
 															<SelectItem key={p._id} value={p._id}>
-																{p.name} ({p.sku})
+																{p.name}
 															</SelectItem>
 														))}
 													</SelectContent>
@@ -421,7 +421,7 @@ function PurchaseOrdersPage() {
 													onChange={(e) =>
 														handleItemChange(index, "quantity", e.target.value)
 													}
-													className="h-9"
+													className="h-10"
 													min="1"
 												/>
 											</div>
@@ -433,7 +433,7 @@ function PurchaseOrdersPage() {
 													onChange={(e) =>
 														handleItemChange(index, "unitPrice", e.target.value)
 													}
-													className="h-9"
+													className="h-10"
 													min="0"
 												/>
 											</div>
@@ -442,7 +442,7 @@ function PurchaseOrdersPage() {
 													type="button"
 													variant="ghost"
 													size="icon"
-													className="h-9"
+													className="h-10"
 													onClick={() => handleRemoveItem(index)}
 													disabled={items.length === 1}
 												>
@@ -790,7 +790,7 @@ function PurchaseOrdersPage() {
 														)
 													}
 													placeholder="SL"
-													className="h-8"
+													className="h-10"
 												/>
 											</div>
 											<div className="space-y-1">
@@ -805,7 +805,7 @@ function PurchaseOrdersPage() {
 														)
 													}
 													placeholder="VD: LOT001"
-													className="h-8"
+													className="h-10"
 												/>
 											</div>
 											<div className="space-y-1">
@@ -820,7 +820,7 @@ function PurchaseOrdersPage() {
 															e.target.value,
 														)
 													}
-													className="h-8"
+													className="h-10"
 												/>
 											</div>
 										</div>
