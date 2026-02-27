@@ -1319,7 +1319,7 @@ function InventoryPage() {
 
 			{/* Create Import Dialog */}
 			<Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[700px]">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[900px]">
 					<form onSubmit={handleCreateImportTransfer}>
 						<DialogHeader>
 							<DialogTitle className="flex items-center gap-2">
@@ -1439,7 +1439,7 @@ function InventoryPage() {
 								{transferForm.items.map((item, index) => (
 									<div key={index} className="space-y-3 rounded-lg border p-3">
 										<div className="grid grid-cols-12 items-end gap-2">
-											<div className="col-span-4">
+											<div className="col-span-3">
 												<Label className="text-xs">Sản phẩm</Label>
 												<Select
 													value={item.productId}
@@ -1514,7 +1514,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-1">
+											<div className="col-span-2">
 												<Label className="text-xs">HSD</Label>
 												<Input
 													type="date"
@@ -1562,7 +1562,7 @@ function InventoryPage() {
 
 			{/* Create Export Dialog */}
 			<Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[700px]">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[900px]">
 					<form onSubmit={handleCreateExportTransfer}>
 						<DialogHeader>
 							<DialogTitle className="flex items-center gap-2">
@@ -1766,7 +1766,7 @@ function InventoryPage() {
 													</SelectContent>
 												</Select>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Số lô</Label>
 												<Input
 													value={item.batchNumber}
@@ -1792,7 +1792,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-1">
+											<div className="col-span-2">
 												<Label className="text-xs">Đơn giá</Label>
 												<Input
 													type="number"
