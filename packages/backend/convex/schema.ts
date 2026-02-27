@@ -250,4 +250,33 @@ export default defineSchema({
 		.index("by_stockTransfer", ["stockTransferId"])
 		.index("by_product", ["productId"])
 		.index("by_inventory", ["inventoryId"]),
+
+	// Employees
+	employees: defineTable({
+		name: v.string(),
+		email: v.string(),
+		phone: v.string(),
+		position: v.union(
+			v.literal("thử việc"),
+			v.literal("học việc"),
+			v.literal("chính thức"),
+			v.literal("cộng tác viên"),
+			v.literal("trưởng nhóm"),
+			v.literal("trưởng phòng"),
+			v.literal("phó giám đốc"),
+			v.literal("giám đốc"),
+		),
+		trackingStatus: v.union(
+			v.literal("theo dõi"),
+			v.literal("ngừng theo dõi"),
+		),
+		joinedDate: v.number(), // timestamp
+		resignationDate: v.optional(v.number()), // timestamp, required when ngừng theo dõi
+		notes: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index("by_trackingStatus", ["trackingStatus"])
+		.index("by_position", ["position"]),
 });
+
