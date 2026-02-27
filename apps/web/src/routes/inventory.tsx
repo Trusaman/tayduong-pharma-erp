@@ -175,6 +175,7 @@ function InventoryPage() {
 
 	// Inventory tab states
 	const [search, setSearch] = useState("");
+	const [expiryFilter, setExpiryFilter] = useState<"all" | "expiring" | "expired" | "valid">("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [form, setForm] = useState<InventoryForm>(initialInventoryForm);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -285,12 +286,24 @@ function InventoryPage() {
 		...(customUnits?.map((u) => ({ value: u.value, label: u.name })) || []),
 	];
 
-	// Filter inventory
-	const filteredInventory = inventory?.filter(
-		(item) =>
+	const filteredInventory = inventory?.filter((item) => {
+		const matchesSearch =
 			item.product?.name.toLowerCase().includes(search.toLowerCase()) ||
-			item.batchNumber.toLowerCase().includes(search.toLowerCase()),
-	);
+			item.batchNumber.toLowerCase().includes(search.toLowerCase());
+
+		const now = Date.now();
+		const thirtyDays = now + 30 * 24 * 60 * 60 * 1000;
+		let matchesExpiry = true;
+		if (expiryFilter === "expired") {
+			matchesExpiry = item.expiryDate < now;
+		} else if (expiryFilter === "expiring") {
+			matchesExpiry = item.expiryDate >= now && item.expiryDate < thirtyDays;
+		} else if (expiryFilter === "valid") {
+			matchesExpiry = item.expiryDate >= thirtyDays;
+		}
+
+		return matchesSearch && matchesExpiry;
+	});
 
 	// Combine import transfers
 	const allImportTransfers = [
@@ -873,14 +886,32 @@ function InventoryPage() {
 						<CardHeader>
 							<div className="flex items-center justify-between">
 								<CardTitle>Danh sách lô hàng</CardTitle>
-								<div className="relative w-64">
-									<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-									<Input
-										placeholder="Tìm kiếm kho hàng..."
-										value={search}
-										onChange={(e) => setSearch(e.target.value)}
-										className="pl-8"
-									/>
+								<div className="flex flex-wrap items-center gap-2">
+									<div className="relative w-60">
+										<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+										<Input
+											placeholder="Tìm tên sản phẩm, số lô..."
+											value={search}
+											onChange={(e) => setSearch(e.target.value)}
+											className="pl-8"
+										/>
+									</div>
+									<Select
+										value={expiryFilter}
+										onValueChange={(v) =>
+											v && setExpiryFilter(v as typeof expiryFilter)
+										}
+									>
+										<SelectTrigger className="w-44">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="all">Tất cả HSD</SelectItem>
+											<SelectItem value="valid">Còn hạn</SelectItem>
+											<SelectItem value="expiring">Sắp hết hạn (&le;30 ngày)</SelectItem>
+											<SelectItem value="expired">Đã hết hạn</SelectItem>
+										</SelectContent>
+									</Select>
 								</div>
 							</div>
 						</CardHeader>
