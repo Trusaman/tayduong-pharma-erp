@@ -3,6 +3,8 @@ import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
 	AlertTriangle,
+	Eye,
+	EyeOff,
 	FolderPlus,
 	Package,
 	Pencil,
@@ -92,11 +94,13 @@ const initialForm: ProductForm = {
 
 function ProductsPage() {
 	const [search, setSearch] = useState("");
+	const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [form, setForm] = useState<ProductForm>(initialForm);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+	const [toggleConfirmProduct, setToggleConfirmProduct] = useState<any>(null);
 
 	// Quick add dialogs
 	const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
@@ -120,11 +124,16 @@ function ProductsPage() {
 		...(customUnits?.map((u) => ({ value: u.value, label: u.name })) || []),
 	];
 
-	const filteredProducts = products?.filter(
-		(p) =>
+	const filteredProducts = products?.filter((p) => {
+		const matchesSearch =
 			p.name.toLowerCase().includes(search.toLowerCase()) ||
-			p.sku.toLowerCase().includes(search.toLowerCase()),
-	);
+			p.sku.toLowerCase().includes(search.toLowerCase());
+		const matchesActive =
+			activeFilter === "all" ||
+			(activeFilter === "active" && p.isActive) ||
+			(activeFilter === "inactive" && !p.isActive);
+		return matchesSearch && matchesActive;
+	});
 
 	const handleQuickAddCategory = async () => {
 		if (!quickCategoryName.trim()) {
@@ -226,6 +235,29 @@ function ProductsPage() {
 			setDeletingId(null);
 		} catch (error: any) {
 			toast.error(error.message || "Không thể xóa sản phẩm");
+		}
+	};
+
+	const handleToggleActive = (product: any) => {
+		setToggleConfirmProduct(product);
+	};
+
+	const handleConfirmToggle = async () => {
+		if (!toggleConfirmProduct) return;
+		try {
+			await updateProduct({
+				id: toggleConfirmProduct._id as any,
+				isActive: !toggleConfirmProduct.isActive,
+			});
+			toast.success(
+				toggleConfirmProduct.isActive
+					? `Đã ngừng theo dõi "${toggleConfirmProduct.name}"`
+					: `Đã theo dõi lại "${toggleConfirmProduct.name}"`,
+			);
+		} catch (error: any) {
+			toast.error(error.message || "Không thể cập nhật trạng thái");
+		} finally {
+			setToggleConfirmProduct(null);
 		}
 	};
 
@@ -442,14 +474,31 @@ function ProductsPage() {
 				<CardHeader>
 					<div className="flex items-center justify-between">
 						<CardTitle>Danh sách sản phẩm</CardTitle>
-						<div className="relative w-64">
-							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-							<Input
-								placeholder="Tìm kiếm sản phẩm..."
-								value={search}
-								onChange={(e) => setSearch(e.target.value)}
-								className="pl-8"
-							/>
+						<div className="flex items-center gap-2">
+							<div className="relative w-56">
+								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+								<Input
+									placeholder="Tìm kiếm sản phẩm..."
+									value={search}
+									onChange={(e) => setSearch(e.target.value)}
+									className="pl-8"
+								/>
+							</div>
+							<Select
+								value={activeFilter}
+								onValueChange={(v) =>
+									v && setActiveFilter(v as typeof activeFilter)
+								}
+							>
+								<SelectTrigger className="w-36">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">Tất cả</SelectItem>
+									<SelectItem value="active">Đang theo dõi</SelectItem>
+									<SelectItem value="inactive">Ngưng theo dõi</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 					</div>
 				</CardHeader>
@@ -475,6 +524,7 @@ function ProductsPage() {
 									<TableHead className="text-right">Giá bán</TableHead>
 									<TableHead className="text-center">Tồn kho</TableHead>
 									<TableHead className="text-center">Trạng thái</TableHead>
+									<TableHead className="text-center">Theo dõi</TableHead>
 									<TableHead className="text-right">Thao tác</TableHead>
 								</TableRow>
 							</TableHeader>
@@ -515,6 +565,20 @@ function ProductsPage() {
 											) : (
 												<Badge variant="secondary">Ngưng bán</Badge>
 											)}
+										</TableCell>
+										<TableCell className="text-center">
+											<Button
+												variant={product.isActive ? "outline" : "secondary"}
+												size="sm"
+												className="gap-1.5 text-xs"
+												onClick={() => handleToggleActive(product)}
+											>
+												{product.isActive ? (
+													<><EyeOff className="h-3.5 w-3.5" />Ngưng theo dõi</>
+												) : (
+													<><Eye className="h-3.5 w-3.5 text-teal-600" />Theo dõi lại</>
+												)}
+											</Button>
 										</TableCell>
 										<TableCell className="text-right">
 											<Button
@@ -562,6 +626,74 @@ function ProductsPage() {
 						</Button>
 						<Button variant="destructive" onClick={handleDelete}>
 							Xóa
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Toggle Active Confirmation Dialog */}
+			<Dialog
+				open={!!toggleConfirmProduct}
+				onOpenChange={(open) => !open && setToggleConfirmProduct(null)}
+			>
+				<DialogContent className="sm:max-w-[420px]">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							{toggleConfirmProduct?.isActive ? (
+								<EyeOff className="h-5 w-5 text-orange-500" />
+							) : (
+								<Eye className="h-5 w-5 text-teal-600" />
+							)}
+							{toggleConfirmProduct?.isActive
+								? "Ngừng theo dõi sản phẩm"
+								: "Theo dõi lại sản phẩm"}
+						</DialogTitle>
+						<DialogDescription>
+							<div className="space-y-2 pt-1">
+								<p>
+									Bạn đang{" "}
+									<strong>
+										{toggleConfirmProduct?.isActive
+											? "ngừng theo dõi"
+											: "kích hoạt theo dõi lại"}
+									</strong>{" "}
+									sản phẩm:
+								</p>
+								<p className="rounded-md bg-muted px-3 py-2 font-medium text-foreground text-sm">
+									{toggleConfirmProduct?.name}{" "}
+									<span className="font-mono text-muted-foreground">
+										({toggleConfirmProduct?.sku})
+									</span>
+								</p>
+								{toggleConfirmProduct?.isActive ? (
+									<p className="text-orange-600 text-sm">
+										⚠️ Sản phẩm này sẽ bị ẩn khỏi danh sách bán
+										hàng và không thể chọn khi tạo phiếu nhập/xuất
+										mới. Dữ liệu lịch sử vẫn được giữ nguyên.
+									</p>
+								) : (
+									<p className="text-teal-600 text-sm">
+										✅ Sản phẩm này sẽ được hiển thị lại và có thể
+										sử dụng trong các phiếu nhập/xuất.
+									</p>
+								)}
+							</div>
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setToggleConfirmProduct(null)}
+						>
+							Hủy
+						</Button>
+						<Button
+							variant={toggleConfirmProduct?.isActive ? "destructive" : "default"}
+							onClick={handleConfirmToggle}
+						>
+							{toggleConfirmProduct?.isActive
+								? "Ngừng theo dõi"
+								: "Theo dõi lại"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
