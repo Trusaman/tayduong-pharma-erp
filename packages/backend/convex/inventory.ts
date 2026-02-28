@@ -68,11 +68,14 @@ export const getExpiring = query({
 	},
 });
 
-// Get low stock products
+// Get low stock products (only active/tracked products)
 export const getLowStock = query({
 	args: {},
 	handler: async (ctx) => {
-		const products = await ctx.db.query("products").collect();
+		const products = await ctx.db
+			.query("products")
+			.withIndex("by_active", (q) => q.eq("isActive", true))
+			.collect();
 
 		const lowStockProducts = await Promise.all(
 			products.map(async (product) => {
