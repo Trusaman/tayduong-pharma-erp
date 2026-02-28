@@ -53,9 +53,10 @@ interface OrderItem {
 	productId: string;
 	quantity: string;
 	unitPrice: string;
+	discountPercent: string;
 }
 
-const initialItem: OrderItem = { productId: "", quantity: "1", unitPrice: "" };
+const initialItem: OrderItem = { productId: "", quantity: "1", unitPrice: "", discountPercent: "" };
 
 function SalesOrdersPage() {
 	const [search, setSearch] = useState("");
@@ -153,6 +154,10 @@ function SalesOrdersPage() {
 					productId: item.productId as Id<"products">,
 					quantity: Number(item.quantity),
 					unitPrice: Number(item.unitPrice),
+					manualDiscountPercent:
+						item.discountPercent !== ""
+							? Number(item.discountPercent)
+							: undefined,
 				})),
 				notes: notes || undefined,
 			});
@@ -363,9 +368,10 @@ function SalesOrdersPage() {
 									</div>
 									{/* Header labels */}
 									<div className="grid grid-cols-12 gap-2 px-1">
-										<div className="col-span-5 text-muted-foreground text-xs font-medium">Sản phẩm</div>
+										<div className="col-span-4 text-muted-foreground text-xs font-medium">Sản phẩm</div>
 										<div className="col-span-2 text-muted-foreground text-xs font-medium">Số lượng</div>
-										<div className="col-span-3 text-muted-foreground text-xs font-medium">Đơn giá</div>
+										<div className="col-span-2 text-muted-foreground text-xs font-medium">Đơn giá</div>
+										<div className="col-span-2 text-muted-foreground text-xs font-medium">%CK</div>
 										<div className="col-span-2 text-muted-foreground text-xs font-medium text-right">Thành tiền</div>
 									</div>
 									{items.map((item, index) => (
@@ -374,12 +380,18 @@ function SalesOrdersPage() {
 											className="space-y-1"
 										>
 											<div className="grid grid-cols-12 items-center gap-2">
-												<div className="col-span-5">
+												<div className="col-span-4">
 													<Select
 														value={item.productId}
-														onValueChange={(v) =>
-															v && handleItemChange(index, "productId", v)
-														}
+														onValueChange={(v) => {
+															if (!v) return;
+															handleItemChange(index, "productId", v);
+															// Pre-fill discount from rules when product changes
+															const auto = applicableDiscounts?.[v]?.totalPercent;
+															if (auto !== undefined && items[index].discountPercent === "") {
+																handleItemChange(index, "discountPercent", String(auto));
+															}
+														}}
 													>
 														<SelectTrigger className="h-10">
 															<SelectValue placeholder="Sản phẩm">
@@ -409,7 +421,7 @@ function SalesOrdersPage() {
 														min="1"
 													/>
 												</div>
-												<div className="col-span-3">
+												<div className="col-span-2">
 													<Input
 														type="number"
 														placeholder="0"
@@ -421,12 +433,39 @@ function SalesOrdersPage() {
 														min="0"
 													/>
 												</div>
+												{/* Discount % input */}
+												<div className="col-span-2">
+													<div className="relative">
+														<Input
+															type="number"
+															placeholder={item.productId && applicableDiscounts?.[item.productId]
+																? String(applicableDiscounts[item.productId].totalPercent)
+																: "0"}
+															value={item.discountPercent}
+															onChange={(e) =>
+																handleItemChange(index, "discountPercent", e.target.value)
+															}
+															className="h-10 pr-6"
+															min="0"
+															max="100"
+														/>
+														<span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">%</span>
+													</div>
+												</div>
 												<div className="col-span-2 flex items-center justify-end gap-1">
-													<span className="text-sm font-medium tabular-nums">
-														{item.quantity && item.unitPrice
-															? formatCurrency(Number(item.quantity) * Number(item.unitPrice))
-															: "—"}
-													</span>
+													{(() => {
+														const qty = Number(item.quantity);
+														const price = Number(item.unitPrice);
+														const disc = item.discountPercent !== ""
+															? Number(item.discountPercent)
+															: (item.productId && applicableDiscounts?.[item.productId]?.totalPercent) || 0;
+														const total = qty && price ? qty * price * (1 - disc / 100) : null;
+														return (
+															<span className="text-sm font-medium tabular-nums">
+																{total !== null ? formatCurrency(total) : "—"}
+															</span>
+														);
+													})()}
 													<Button
 														type="button"
 														variant="ghost"
@@ -439,22 +478,6 @@ function SalesOrdersPage() {
 													</Button>
 												</div>
 											</div>
-											{item.productId &&
-												item.unitPrice &&
-												applicableDiscounts?.[item.productId] && (
-													<p className="pl-1 text-teal-700 text-xs">
-														Chiết khấu:{" "}
-														{applicableDiscounts[item.productId].totalPercent}
-														% → Thực tế:{" "}
-														{formatCurrency(
-															Number(item.unitPrice) *
-															(1 -
-																applicableDiscounts[item.productId]
-																	.totalPercent /
-																100),
-														)}
-													</p>
-												)}
 										</div>
 									))}
 									{/* Total summary */}
@@ -469,8 +492,10 @@ function SalesOrdersPage() {
 													0,
 												);
 												const totalDiscount = items.reduce((sum, i) => {
-													if (!i.productId || !i.unitPrice || !applicableDiscounts?.[i.productId]) return sum;
-													const pct = applicableDiscounts[i.productId].totalPercent;
+													if (!i.quantity || !i.unitPrice) return sum;
+													const pct = i.discountPercent !== ""
+														? Number(i.discountPercent)
+														: (i.productId && applicableDiscounts?.[i.productId]?.totalPercent) || 0;
 													return sum + Number(i.quantity) * Number(i.unitPrice) * (pct / 100);
 												}, 0);
 												const grandTotal = subtotal - totalDiscount;
@@ -788,7 +813,7 @@ function SalesOrdersPage() {
 									<Label>Nhân viên giao hàng</Label>
 									<Select
 										value={deliveryEmployeeId}
-										onValueChange={(v) => setDeliveryEmployeeId(v)}
+										onValueChange={(v) => setDeliveryEmployeeId(v ?? "")}
 									>
 										<SelectTrigger>
 											<SelectValue placeholder="Chọn nhân viên giao">

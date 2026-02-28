@@ -513,7 +513,7 @@ function DiscountsPage() {
 													<Label className="opacity-0">Thành tiền</Label>
 													<div className="flex h-9 items-center text-muted-foreground text-sm">
 														{discountForm[group.key].percent &&
-														Number(discountForm[group.key].percent) > 0
+															Number(discountForm[group.key].percent) > 0
 															? "Sẽ tính khi có đơn hàng"
 															: "-"}
 													</div>

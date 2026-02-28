@@ -137,6 +137,7 @@ export const create = mutation({
 				productId: v.id("products"),
 				quantity: v.number(),
 				unitPrice: v.number(),
+				manualDiscountPercent: v.optional(v.number()),
 			}),
 		),
 		notes: v.optional(v.string()),
@@ -172,10 +173,14 @@ export const create = mutation({
 				return customerMatch && productMatch;
 			});
 
-			const discountPercent = Math.min(
+			const autoDiscountPercent = Math.min(
 				100,
 				matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
 			);
+			const discountPercent =
+				item.manualDiscountPercent !== undefined
+					? Math.min(100, Math.max(0, item.manualDiscountPercent))
+					: autoDiscountPercent;
 
 			const baseUnitPrice = item.unitPrice;
 			const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
