@@ -24,7 +24,7 @@ export const list = query({
 			v.union(
 				v.literal("draft"),
 				v.literal("pending"),
-				v.literal("partial"),
+				v.literal("delivering"),
 				v.literal("completed"),
 				v.literal("cancelled"),
 			),
@@ -60,6 +60,9 @@ export const getWithDetails = query({
 		const salesman = order.salesmanId
 			? await ctx.db.get(order.salesmanId)
 			: null;
+		const deliveryEmployee = order.deliveryEmployeeId
+			? await ctx.db.get(order.deliveryEmployeeId)
+			: null;
 
 		const items = await ctx.db
 			.query("salesOrderItems")
@@ -77,10 +80,35 @@ export const getWithDetails = query({
 			...order,
 			customer,
 			salesman,
+			deliveryEmployee,
 			items: itemsWithProducts,
 		};
 	},
 });
+
+// Get status change history for an order
+export const getStatusLogs = query({
+	args: { salesOrderId: v.id("salesOrders") },
+	handler: async (ctx, args) => {
+		const logs = await ctx.db
+			.query("salesOrderStatusLogs")
+			.withIndex("by_salesOrder", (q) =>
+				q.eq("salesOrderId", args.salesOrderId),
+			)
+			.order("asc")
+			.collect();
+
+		return await Promise.all(
+			logs.map(async (log) => {
+				const deliveryEmployee = log.deliveryEmployeeId
+					? await ctx.db.get(log.deliveryEmployeeId)
+					: null;
+				return { ...log, deliveryEmployee };
+			}),
+		);
+	},
+});
+
 
 // List with customer details
 export const listWithCustomers = query({
@@ -212,19 +240,42 @@ export const updateStatus = mutation({
 		status: v.union(
 			v.literal("draft"),
 			v.literal("pending"),
-			v.literal("partial"),
+			v.literal("delivering"),
 			v.literal("completed"),
 			v.literal("cancelled"),
 		),
+		changedByName: v.string(),
+		comment: v.optional(v.string()),
+		deliveryEmployeeId: v.optional(v.id("employees")),
 	},
 	handler: async (ctx, args) => {
-		await ctx.db.patch(args.id, {
+		const order = await ctx.db.get(args.id);
+		if (!order) throw new Error("Không tìm thấy đơn hàng");
+
+		const patchData: Record<string, unknown> = {
 			status: args.status,
 			updatedAt: Date.now(),
+		};
+		if (args.deliveryEmployeeId) {
+			patchData.deliveryEmployeeId = args.deliveryEmployeeId;
+		}
+		await ctx.db.patch(args.id, patchData);
+
+		// Log the status change
+		await ctx.db.insert("salesOrderStatusLogs", {
+			salesOrderId: args.id,
+			fromStatus: order.status,
+			toStatus: args.status,
+			changedByName: args.changedByName,
+			comment: args.comment,
+			deliveryEmployeeId: args.deliveryEmployeeId,
+			createdAt: Date.now(),
 		});
+
 		return await ctx.db.get(args.id);
 	},
 });
+
 
 // Fulfill items from sales order (reduces inventory)
 export const fulfillItems = mutation({
@@ -293,7 +344,7 @@ export const fulfillItems = mutation({
 		);
 
 		await ctx.db.patch(args.salesOrderId, {
-			status: fullyFulfilled ? "completed" : "partial",
+			status: fullyFulfilled ? "completed" : "delivering",
 			updatedAt: now,
 		});
 

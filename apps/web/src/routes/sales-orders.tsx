@@ -9,6 +9,7 @@ import {
 	Plus,
 	Search,
 	Trash2,
+	Truck,
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -66,6 +67,16 @@ function SalesOrdersPage() {
 	const [notes, setNotes] = useState("");
 	const [items, setItems] = useState<OrderItem[]>([initialItem]);
 
+	// Status‑change dialog state
+	const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+	const [pendingStatusChange, setPendingStatusChange] = useState<{
+		orderId: string;
+		toStatus: "pending" | "delivering" | "completed" | "cancelled";
+	} | null>(null);
+	const [changedByName, setChangedByName] = useState("");
+	const [statusComment, setStatusComment] = useState("");
+	const [deliveryEmployeeId, setDeliveryEmployeeId] = useState("");
+
 	const orders = useQuery(api.salesOrders.listWithCustomers, {});
 	const customers = useQuery(api.customers.list, { activeOnly: true });
 	const salesmen = useQuery(api.salesmen.list, { activeOnly: true });
@@ -87,7 +98,13 @@ function SalesOrdersPage() {
 		api.salesOrders.getWithDetails,
 		selectedOrderId ? { id: selectedOrderId as Id<"salesOrders"> } : "skip",
 	);
-
+	const employees = useQuery(api.employees.list, {});
+	const statusLogs = useQuery(
+		api.salesOrders.getStatusLogs,
+		selectedOrderId
+			? { salesOrderId: selectedOrderId as Id<"salesOrders"> }
+			: "skip",
+	);
 	const createOrder = useMutation(api.salesOrders.create);
 	const updateStatus = useMutation(api.salesOrders.updateStatus);
 	const deleteOrder = useMutation(api.salesOrders.remove);
@@ -147,13 +164,33 @@ function SalesOrdersPage() {
 		}
 	};
 
-	const handleStatusChange = async (
+	const openStatusDialog = (
 		orderId: string,
-		status: "draft" | "pending" | "partial" | "completed" | "cancelled",
+		toStatus: "pending" | "delivering" | "completed" | "cancelled",
 	) => {
+		setPendingStatusChange({ orderId, toStatus });
+		setChangedByName("");
+		setStatusComment("");
+		setDeliveryEmployeeId("");
+		setStatusDialogOpen(true);
+	};
+
+	const handleStatusChange = async (e: React.FormEvent) => {
+		e.preventDefault();
+		if (!pendingStatusChange) return;
 		try {
-			await updateStatus({ id: orderId as Id<"salesOrders">, status });
+			await updateStatus({
+				id: pendingStatusChange.orderId as Id<"salesOrders">,
+				status: pendingStatusChange.toStatus,
+				changedByName,
+				comment: statusComment || undefined,
+				deliveryEmployeeId:
+					deliveryEmployeeId
+						? (deliveryEmployeeId as Id<"employees">)
+						: undefined,
+			});
 			toast.success("Đã cập nhật trạng thái đơn");
+			setStatusDialogOpen(false);
 		} catch (error) {
 			toast.error(
 				error instanceof Error
@@ -192,19 +229,20 @@ function SalesOrdersPage() {
 		return new Date(timestamp).toLocaleDateString("vi-VN");
 	};
 
+	const formatDateTime = (timestamp: number) => {
+		return new Date(timestamp).toLocaleString("vi-VN");
+	};
+
 	const getStatusBadge = (status: string) => {
 		switch (status) {
 			case "draft":
 				return <Badge variant="secondary">Bản nháp</Badge>;
 			case "pending":
 				return <Badge variant="outline">Chờ xử lý</Badge>;
-			case "partial":
+			case "delivering":
 				return (
-					<Badge
-						variant="outline"
-						className="border-yellow-500 text-yellow-500"
-					>
-						Một phần
+					<Badge variant="outline" className="border-blue-500 text-blue-600">
+						Đang giao hàng
 					</Badge>
 				);
 			case "completed":
@@ -219,6 +257,18 @@ function SalesOrdersPage() {
 				return <Badge variant="outline">{status}</Badge>;
 		}
 	};
+
+	const getStatusLabel = (status: string) => {
+		const map: Record<string, string> = {
+			draft: "Bản nháp",
+			pending: "Chờ xử lý",
+			delivering: "Đang giao hàng",
+			completed: "Hoàn thành",
+			cancelled: "Đã hủy",
+		};
+		return map[status] ?? status;
+	};
+
 
 	const viewOrderDetails = (orderId: string) => {
 		setSelectedOrderId(orderId);
@@ -536,9 +586,8 @@ function SalesOrdersPage() {
 													<Button
 														variant="ghost"
 														size="icon"
-														onClick={() =>
-															handleStatusChange(order._id, "pending")
-														}
+														title="Xác nhận đơn"
+														onClick={() => openStatusDialog(order._id, "pending")}
 													>
 														<CheckCircle className="h-4 w-4 text-green-500" />
 													</Button>
@@ -552,14 +601,33 @@ function SalesOrdersPage() {
 												</>
 											)}
 											{order.status === "pending" && (
+												<>
+													<Button
+														variant="ghost"
+														size="icon"
+														title="Giao hàng"
+														onClick={() => openStatusDialog(order._id, "delivering")}
+													>
+														<Truck className="h-4 w-4 text-blue-500" />
+													</Button>
+													<Button
+														variant="ghost"
+														size="icon"
+														title="Hủy đơn"
+														onClick={() => openStatusDialog(order._id, "cancelled")}
+													>
+														<XCircle className="h-4 w-4 text-destructive" />
+													</Button>
+												</>
+											)}
+											{order.status === "delivering" && (
 												<Button
 													variant="ghost"
 													size="icon"
-													onClick={() =>
-														handleStatusChange(order._id, "cancelled")
-													}
+													title="Hoàn thành"
+													onClick={() => openStatusDialog(order._id, "completed")}
 												>
-													<XCircle className="h-4 w-4 text-destructive" />
+													<CheckCircle className="h-4 w-4 text-green-600" />
 												</Button>
 											)}
 										</TableCell>
@@ -573,7 +641,7 @@ function SalesOrdersPage() {
 
 			{/* Order Details Dialog */}
 			<Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-				<DialogContent className="sm:max-w-[600px]">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[700px]">
 					<DialogHeader>
 						<DialogTitle>
 							Chi tiết đơn - {orderDetails?.orderNumber}
@@ -591,10 +659,12 @@ function SalesOrdersPage() {
 									{getStatusBadge(orderDetails.status)}
 								</div>
 								<div>
-									<p className="text-muted-foreground text-sm">Nhân viên</p>
-									<p className="font-medium">
-										{orderDetails.salesman?.name || "-"}
-									</p>
+									<p className="text-muted-foreground text-sm">Nhân viên bán hàng</p>
+									<p className="font-medium">{orderDetails.salesman?.name || "-"}</p>
+								</div>
+								<div>
+									<p className="text-muted-foreground text-sm">Nhân viên giao hàng</p>
+									<p className="font-medium">{orderDetails.deliveryEmployee?.name || "-"}</p>
 								</div>
 								<div>
 									<p className="text-muted-foreground text-sm">Ngày đặt</p>
@@ -602,17 +672,11 @@ function SalesOrdersPage() {
 								</div>
 								<div>
 									<p className="text-muted-foreground text-sm">Tổng tiền</p>
-									<p className="font-bold">
-										{formatCurrency(orderDetails.totalAmount)}
-									</p>
+									<p className="font-bold">{formatCurrency(orderDetails.totalAmount)}</p>
 								</div>
 								<div>
-									<p className="text-muted-foreground text-sm">
-										Tổng chiết khấu
-									</p>
-									<p className="font-bold text-teal-700">
-										{formatCurrency(orderDetails.totalDiscountAmount || 0)}
-									</p>
+									<p className="text-muted-foreground text-sm">Tổng chiết khấu</p>
+									<p className="font-bold text-teal-700">{formatCurrency(orderDetails.totalDiscountAmount || 0)}</p>
 								</div>
 							</div>
 
@@ -642,42 +706,122 @@ function SalesOrdersPage() {
 										{orderDetails.items?.map((item) => (
 											<TableRow key={item._id}>
 												<TableCell>{item.product?.name}</TableCell>
-												<TableCell className="text-right">
-													{item.quantity}
-												</TableCell>
-												<TableCell className="text-right">
-													{item.fulfilledQuantity || 0}
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(item.baseUnitPrice ?? item.unitPrice)}
-												</TableCell>
-												<TableCell className="text-right">
-													{item.discountPercent ?? 0}%
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(item.discountAmount ?? 0)}
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(item.unitPrice)}
-												</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(item.quantity * item.unitPrice)}
-												</TableCell>
+												<TableCell className="text-right">{item.quantity}</TableCell>
+												<TableCell className="text-right">{item.fulfilledQuantity || 0}</TableCell>
+												<TableCell className="text-right">{formatCurrency(item.baseUnitPrice ?? item.unitPrice)}</TableCell>
+												<TableCell className="text-right">{item.discountPercent ?? 0}%</TableCell>
+												<TableCell className="text-right">{formatCurrency(item.discountAmount ?? 0)}</TableCell>
+												<TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>
+												<TableCell className="text-right">{formatCurrency(item.quantity * item.unitPrice)}</TableCell>
 											</TableRow>
 										))}
 									</TableBody>
 								</Table>
 							</div>
+
+							{/* Status history timeline */}
+							<div>
+								<p className="mb-3 font-medium text-sm">Lịch sử trạng thái</p>
+								{statusLogs === undefined ? (
+									<p className="text-muted-foreground text-sm">Đang tải...</p>
+								) : statusLogs.length === 0 ? (
+									<p className="text-muted-foreground text-sm">Chưa có lịch sử thay đổi.</p>
+								) : (
+									<ol className="relative border-l border-muted-foreground/20 ml-3 space-y-4">
+										{statusLogs.map((log) => (
+											<li key={log._id} className="ml-4">
+												<div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted-foreground/40" />
+												<div className="flex flex-col gap-0.5">
+													<div className="flex items-center gap-2">
+														{getStatusBadge(log.fromStatus)}
+														<span className="text-muted-foreground text-xs">→</span>
+														{getStatusBadge(log.toStatus)}
+													</div>
+													<p className="text-xs text-muted-foreground">
+														{formatDateTime(log.createdAt)} — <span className="font-medium text-foreground">{log.changedByName}</span>
+													</p>
+													{log.deliveryEmployee && (
+														<p className="text-xs text-muted-foreground">Giao bởi: <span className="font-medium text-foreground">{log.deliveryEmployee.name}</span></p>
+													)}
+													{log.comment && (
+														<p className="text-xs italic text-muted-foreground">"{log.comment}"</p>
+													)}
+												</div>
+											</li>
+										))}
+									</ol>
+								)}
+							</div>
 						</div>
 					)}
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setDetailDialogOpen(false)}
-						>
+						<Button variant="outline" onClick={() => setDetailDialogOpen(false)}>
 							Đóng
 						</Button>
 					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Status Change Dialog */}
+			<Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+				<DialogContent className="sm:max-w-[420px]">
+					<form onSubmit={handleStatusChange}>
+						<DialogHeader>
+							<DialogTitle>Cập nhật trạng thái</DialogTitle>
+							<DialogDescription>
+								Chuyển sang:{" "}
+								<strong>{getStatusLabel(pendingStatusChange?.toStatus ?? "")}</strong>
+							</DialogDescription>
+						</DialogHeader>
+						<div className="grid gap-4 py-4">
+							<div className="space-y-2">
+								<Label>Người thực hiện *</Label>
+								<Input
+									placeholder="Nhập tên người thực hiện"
+									value={changedByName}
+									onChange={(e) => setChangedByName(e.target.value)}
+									required
+								/>
+							</div>
+							{pendingStatusChange?.toStatus === "delivering" && (
+								<div className="space-y-2">
+									<Label>Nhân viên giao hàng</Label>
+									<Select
+										value={deliveryEmployeeId}
+										onValueChange={(v) => setDeliveryEmployeeId(v)}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Chọn nhân viên giao">
+												{deliveryEmployeeId
+													? (employees?.find((e) => e._id === deliveryEmployeeId)?.name ?? "Chọn nhân viên giao")
+													: "Chọn nhân viên giao"}
+											</SelectValue>
+										</SelectTrigger>
+										<SelectContent>
+											{employees?.map((emp) => (
+												<SelectItem key={emp._id} value={emp._id}>
+													{emp.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+							)}
+							<div className="space-y-2">
+								<Label>Ghi chú</Label>
+								<Textarea
+									placeholder="Ghi chú thêm về lần thay đổi này..."
+									value={statusComment}
+									onChange={(e) => setStatusComment(e.target.value)}
+									rows={3}
+								/>
+							</div>
+						</div>
+						<DialogFooter>
+							<Button type="button" variant="outline" onClick={() => setStatusDialogOpen(false)}>Hủy</Button>
+							<Button type="submit">Xác nhận</Button>
+						</DialogFooter>
+					</form>
 				</DialogContent>
 			</Dialog>
 		</div>

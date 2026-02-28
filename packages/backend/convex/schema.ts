@@ -168,10 +168,11 @@ export default defineSchema({
 		status: v.union(
 			v.literal("draft"),
 			v.literal("pending"),
-			v.literal("partial"),
+			v.literal("delivering"),
 			v.literal("completed"),
 			v.literal("cancelled"),
 		),
+		deliveryEmployeeId: v.optional(v.id("employees")),
 		totalAmount: v.number(),
 		totalDiscountAmount: v.optional(v.number()),
 		notes: v.optional(v.string()),
@@ -195,6 +196,29 @@ export default defineSchema({
 		discountAmount: v.optional(v.number()),
 		appliedDiscountTypes: v.optional(v.array(v.string())),
 		fulfilledQuantity: v.number(),
+		createdAt: v.number(),
+	}).index("by_salesOrder", ["salesOrderId"]),
+
+	// Sales Order Status Logs
+	salesOrderStatusLogs: defineTable({
+		salesOrderId: v.id("salesOrders"),
+		fromStatus: v.union(
+			v.literal("draft"),
+			v.literal("pending"),
+			v.literal("delivering"),
+			v.literal("completed"),
+			v.literal("cancelled"),
+		),
+		toStatus: v.union(
+			v.literal("draft"),
+			v.literal("pending"),
+			v.literal("delivering"),
+			v.literal("completed"),
+			v.literal("cancelled"),
+		),
+		changedByName: v.string(),
+		comment: v.optional(v.string()),
+		deliveryEmployeeId: v.optional(v.id("employees")),
 		createdAt: v.number(),
 	}).index("by_salesOrder", ["salesOrderId"]),
 
