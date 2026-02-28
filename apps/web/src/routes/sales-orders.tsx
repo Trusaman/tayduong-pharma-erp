@@ -77,10 +77,10 @@ function SalesOrdersPage() {
 		api.discounts.getApplicableForOrder,
 		customerId && salesmanId && selectedProductIds.length > 0
 			? {
-					customerId: customerId as Id<"customers">,
-					salesmanId: salesmanId as Id<"salesmen">,
-					productIds: selectedProductIds,
-				}
+				customerId: customerId as Id<"customers">,
+				salesmanId: salesmanId as Id<"salesmen">,
+				productIds: selectedProductIds,
+			}
 			: "skip",
 	);
 	const orderDetails = useQuery(
@@ -241,7 +241,7 @@ function SalesOrdersPage() {
 							Tạo đơn
 						</Button>
 					</DialogTrigger>
-					<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
+					<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[800px]">
 						<form onSubmit={handleCreateOrder}>
 							<DialogHeader>
 								<DialogTitle>Tạo đơn bán hàng</DialogTitle>
@@ -259,7 +259,11 @@ function SalesOrdersPage() {
 											required
 										>
 											<SelectTrigger>
-												<SelectValue placeholder="Chọn khách hàng" />
+												<SelectValue placeholder="Chọn khách hàng">
+													{customerId
+														? (customers?.find((c) => c._id === customerId)?.name ?? "Chọn khách hàng")
+														: "Chọn khách hàng"}
+												</SelectValue>
 											</SelectTrigger>
 											<SelectContent>
 												{customers?.map((c) => (
@@ -278,7 +282,11 @@ function SalesOrdersPage() {
 											required
 										>
 											<SelectTrigger>
-												<SelectValue placeholder="Chọn nhân viên" />
+												<SelectValue placeholder="Chọn nhân viên">
+													{salesmanId
+														? (salesmen?.find((s) => s._id === salesmanId)?.name ?? "Chọn nhân viên")
+														: "Chọn nhân viên"}
+												</SelectValue>
 											</SelectTrigger>
 											<SelectContent>
 												{salesmen?.map((s) => (
@@ -303,84 +311,140 @@ function SalesOrdersPage() {
 											<Plus className="mr-1 h-4 w-4" /> Thêm sản phẩm
 										</Button>
 									</div>
+									{/* Header labels */}
+									<div className="grid grid-cols-12 gap-2 px-1">
+										<div className="col-span-5 text-muted-foreground text-xs font-medium">Sản phẩm</div>
+										<div className="col-span-2 text-muted-foreground text-xs font-medium">Số lượng</div>
+										<div className="col-span-3 text-muted-foreground text-xs font-medium">Đơn giá</div>
+										<div className="col-span-2 text-muted-foreground text-xs font-medium text-right">Thành tiền</div>
+									</div>
 									{items.map((item, index) => (
 										<div
 											key={index}
-											className="grid grid-cols-12 items-end gap-2"
+											className="space-y-1"
 										>
-											<div className="col-span-5">
-												<Select
-													value={item.productId}
-													onValueChange={(v) =>
-														v && handleItemChange(index, "productId", v)
-													}
-												>
-													<SelectTrigger className="h-10">
-														<SelectValue placeholder="Sản phẩm" />
-													</SelectTrigger>
-													<SelectContent>
-														{products?.map((p) => (
-															<SelectItem key={p._id} value={p._id}>
-																{p.name}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
+											<div className="grid grid-cols-12 items-center gap-2">
+												<div className="col-span-5">
+													<Select
+														value={item.productId}
+														onValueChange={(v) =>
+															v && handleItemChange(index, "productId", v)
+														}
+													>
+														<SelectTrigger className="h-10">
+															<SelectValue placeholder="Sản phẩm">
+																{item.productId
+																	? (products?.find((p) => p._id === item.productId)?.name ?? "Sản phẩm")
+																	: "Sản phẩm"}
+															</SelectValue>
+														</SelectTrigger>
+														<SelectContent>
+															{products?.map((p) => (
+																<SelectItem key={p._id} value={p._id}>
+																	{p.name}
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+												</div>
+												<div className="col-span-2">
+													<Input
+														type="number"
+														placeholder="1"
+														value={item.quantity}
+														onChange={(e) =>
+															handleItemChange(index, "quantity", e.target.value)
+														}
+														className="h-10"
+														min="1"
+													/>
+												</div>
+												<div className="col-span-3">
+													<Input
+														type="number"
+														placeholder="0"
+														value={item.unitPrice}
+														onChange={(e) =>
+															handleItemChange(index, "unitPrice", e.target.value)
+														}
+														className="h-10"
+														min="0"
+													/>
+												</div>
+												<div className="col-span-2 flex items-center justify-end gap-1">
+													<span className="text-sm font-medium tabular-nums">
+														{item.quantity && item.unitPrice
+															? formatCurrency(Number(item.quantity) * Number(item.unitPrice))
+															: "—"}
+													</span>
+													<Button
+														type="button"
+														variant="ghost"
+														size="icon"
+														className="h-8 w-8 shrink-0"
+														onClick={() => handleRemoveItem(index)}
+														disabled={items.length === 1}
+													>
+														<Trash2 className="h-4 w-4 text-destructive" />
+													</Button>
+												</div>
 											</div>
-											<div className="col-span-2">
-												<Input
-													type="number"
-													placeholder="SL"
-													value={item.quantity}
-													onChange={(e) =>
-														handleItemChange(index, "quantity", e.target.value)
-													}
-													className="h-10"
-													min="1"
-												/>
-											</div>
-											<div className="col-span-4">
-												<Input
-													type="number"
-													placeholder="Đơn giá"
-													value={item.unitPrice}
-													onChange={(e) =>
-														handleItemChange(index, "unitPrice", e.target.value)
-													}
-													className="h-10"
-													min="0"
-												/>
-												{item.productId &&
-													item.unitPrice &&
-													applicableDiscounts?.[item.productId] && (
-														<p className="mt-1 text-teal-700 text-xs">
-															Chiết khấu:{" "}
-															{applicableDiscounts[item.productId].totalPercent}
-															% → Thực tế:{" "}
-															{formatCurrency(
-																Number(item.unitPrice) *
-																	(1 -
-																		applicableDiscounts[item.productId]
-																			.totalPercent /
-																			100),
-															)}
-														</p>
-													)}
-											</div>
-											<div className="col-span-1">
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon"
-													className="h-10"
-													onClick={() => handleRemoveItem(index)}
-													disabled={items.length === 1}
-												>
-													<Trash2 className="h-4 w-4 text-destructive" />
-												</Button>
-											</div>
+											{item.productId &&
+												item.unitPrice &&
+												applicableDiscounts?.[item.productId] && (
+													<p className="pl-1 text-teal-700 text-xs">
+														Chiết khấu:{" "}
+														{applicableDiscounts[item.productId].totalPercent}
+														% → Thực tế:{" "}
+														{formatCurrency(
+															Number(item.unitPrice) *
+															(1 -
+																applicableDiscounts[item.productId]
+																	.totalPercent /
+																100),
+														)}
+													</p>
+												)}
 										</div>
 									))}
+									{/* Total summary */}
+									{items.some((i) => i.quantity && i.unitPrice) && (
+										<div className="mt-2 rounded-md border bg-muted/40 px-4 py-3 space-y-1">
+											{(() => {
+												const subtotal = items.reduce(
+													(sum, i) =>
+														i.quantity && i.unitPrice
+															? sum + Number(i.quantity) * Number(i.unitPrice)
+															: sum,
+													0,
+												);
+												const totalDiscount = items.reduce((sum, i) => {
+													if (!i.productId || !i.unitPrice || !applicableDiscounts?.[i.productId]) return sum;
+													const pct = applicableDiscounts[i.productId].totalPercent;
+													return sum + Number(i.quantity) * Number(i.unitPrice) * (pct / 100);
+												}, 0);
+												const grandTotal = subtotal - totalDiscount;
+												return (
+													<>
+														<div className="flex justify-between text-sm">
+															<span className="text-muted-foreground">Tổng cộng</span>
+															<span className="font-medium">{formatCurrency(subtotal)}</span>
+														</div>
+														{totalDiscount > 0 && (
+															<div className="flex justify-between text-sm">
+																<span className="text-muted-foreground">Chiết khấu</span>
+																<span className="text-teal-700 font-medium">- {formatCurrency(totalDiscount)}</span>
+															</div>
+														)}
+														<div className="flex justify-between text-sm border-t pt-1 mt-1">
+															<span className="font-semibold">Thực thu</span>
+															<span className="font-bold text-primary">{formatCurrency(grandTotal)}</span>
+														</div>
+													</>
+												);
+											})()}
+										</div>
+									)}
 								</div>
 
 								<div className="space-y-2">
