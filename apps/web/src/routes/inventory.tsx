@@ -1350,7 +1350,7 @@ function InventoryPage() {
 
 			{/* Create Import Dialog */}
 			<Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[900px]">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[1100px]">
 					<form onSubmit={handleCreateImportTransfer}>
 						<DialogHeader>
 							<DialogTitle className="flex items-center gap-2">
@@ -1583,6 +1583,24 @@ function InventoryPage() {
 								))}
 							</div>
 						</div>
+						{/* Order total summary */}
+						<div className="rounded-lg border bg-muted/40 px-4 py-3">
+							<div className="flex items-center justify-between">
+								<span className="font-medium text-sm">Tổng giá trị đơn hàng</span>
+								<span className="font-bold text-lg text-teal-700">
+									{formatCurrency(
+										transferForm.items.reduce((sum, item) => {
+											const qty = Number.parseFloat(item.quantity) || 0;
+											const price = Number.parseFloat(item.unitPrice) || 0;
+											return sum + qty * price;
+										}, 0),
+									)}
+								</span>
+							</div>
+							<p className="mt-1 text-muted-foreground text-xs">
+								{transferForm.items.filter((i) => i.productId && i.quantity && i.unitPrice).length} sản phẩm hợp lệ
+							</p>
+						</div>
 						<DialogFooter>
 							<Button
 								type="button"
@@ -1599,7 +1617,7 @@ function InventoryPage() {
 
 			{/* Create Export Dialog */}
 			<Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[900px]">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[1100px]">
 					<form onSubmit={handleCreateExportTransfer}>
 						<DialogHeader>
 							<DialogTitle className="flex items-center gap-2">
@@ -1861,6 +1879,24 @@ function InventoryPage() {
 									</div>
 								))}
 							</div>
+						</div>
+						{/* Order total summary */}
+						<div className="rounded-lg border bg-muted/40 px-4 py-3">
+							<div className="flex items-center justify-between">
+								<span className="font-medium text-sm">Tổng giá trị đơn hàng</span>
+								<span className="font-bold text-lg text-teal-700">
+									{formatCurrency(
+										transferForm.items.reduce((sum, item) => {
+											const qty = Number.parseFloat(item.quantity) || 0;
+											const price = Number.parseFloat(item.unitPrice) || 0;
+											return sum + qty * price;
+										}, 0),
+									)}
+								</span>
+							</div>
+							<p className="mt-1 text-muted-foreground text-xs">
+								{transferForm.items.filter((i) => i.productId && i.quantity && i.unitPrice).length} sản phẩm hợp lệ
+							</p>
 						</div>
 						<DialogFooter>
 							<Button
