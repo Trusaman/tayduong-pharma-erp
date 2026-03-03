@@ -1517,6 +1517,21 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
+											<div className="col-span-2">
+												<Label className="text-xs">HSD</Label>
+												<Input
+													type="date"
+													value={item.expiryDate}
+													onChange={(e) =>
+														handleTransferItemChange(
+															index,
+															"expiryDate",
+															e.target.value,
+														)
+													}
+													className="mt-1 h-9"
+												/>
+											</div>
 											<div className="col-span-1">
 												<Label className="text-xs">Số lượng</Label>
 												<Input
@@ -1551,21 +1566,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-2">
-												<Label className="text-xs">HSD</Label>
-												<Input
-													type="date"
-													value={item.expiryDate}
-													onChange={(e) =>
-														handleTransferItemChange(
-															index,
-															"expiryDate",
-															e.target.value,
-														)
-													}
-													className="mt-1 h-9"
-												/>
-											</div>
+
 											<div className="col-span-4">
 												<Label className="text-xs">Thành tiền</Label>
 												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
@@ -1839,6 +1840,16 @@ function InventoryPage() {
 													placeholder="Tự động"
 												/>
 											</div>
+											<div className="col-span-2">
+												<Label className="text-xs">HSD</Label>
+												<Input
+													type="date"
+													value={item.expiryDate}
+													className="mt-1 h-9 bg-muted"
+													readOnly
+													placeholder="T\u1ef1 \u0111\u1ed9ng"
+												/>
+											</div>
 											<div className="col-span-1">
 												<Label className="text-xs">Số lượng</Label>
 												<Input
@@ -1872,7 +1883,8 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-3">
+
+											<div className="col-span-2">
 												<Label className="text-xs">Thành tiền</Label>
 												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
 													{formatCurrency(
