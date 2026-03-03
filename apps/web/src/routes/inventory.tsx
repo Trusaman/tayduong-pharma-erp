@@ -1371,7 +1371,13 @@ function InventoryPage() {
 										required
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Chọn loại phiếu" />
+											{transferForm.transferType ? (
+												getTransferTypeLabel(transferForm.transferType)
+											) : (
+												<span className="text-muted-foreground">
+													Chọn loại phiếu
+												</span>
+											)}
 										</SelectTrigger>
 										<SelectContent>
 											{IMPORT_TYPES.map((type) => (
