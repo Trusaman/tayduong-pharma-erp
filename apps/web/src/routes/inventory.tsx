@@ -1502,7 +1502,7 @@ function InventoryPage() {
 													</SelectContent>
 												</Select>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Số lô</Label>
 												<Input
 													value={item.batchNumber}
@@ -1517,7 +1517,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Số lượng</Label>
 												<Input
 													type="number"
@@ -1534,7 +1534,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Đơn giá</Label>
 												<Input
 													type="number"
@@ -1565,6 +1565,15 @@ function InventoryPage() {
 													}
 													className="mt-1 h-9"
 												/>
+											</div>
+											<div className="col-span-4">
+												<Label className="text-xs">Thành tiền</Label>
+												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
+													{formatCurrency(
+														(Number.parseFloat(item.quantity) || 0) *
+														(Number.parseFloat(item.unitPrice) || 0),
+													)}
+												</div>
 											</div>
 											<div className="col-span-1">
 												<Button
@@ -1784,7 +1793,7 @@ function InventoryPage() {
 													</SelectContent>
 												</Select>
 											</div>
-											<div className="col-span-3">
+											<div className="col-span-2">
 												<Label className="text-xs">Lô hàng từ kho</Label>
 												<Select
 													value={item.inventoryId}
@@ -1830,7 +1839,7 @@ function InventoryPage() {
 													placeholder="Tự động"
 												/>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Số lượng</Label>
 												<Input
 													type="number"
@@ -1847,7 +1856,7 @@ function InventoryPage() {
 													className="mt-1 h-9"
 												/>
 											</div>
-											<div className="col-span-2">
+											<div className="col-span-1">
 												<Label className="text-xs">Đơn giá</Label>
 												<Input
 													type="number"
@@ -1862,6 +1871,15 @@ function InventoryPage() {
 													}
 													className="mt-1 h-9"
 												/>
+											</div>
+											<div className="col-span-3">
+												<Label className="text-xs">Thành tiền</Label>
+												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
+													{formatCurrency(
+														(Number.parseFloat(item.quantity) || 0) *
+														(Number.parseFloat(item.unitPrice) || 0),
+													)}
+												</div>
 											</div>
 											<div className="col-span-1">
 												<Button
