@@ -413,7 +413,11 @@ function DiscountsPage() {
 												}
 											>
 												<SelectTrigger>
-													<SelectValue placeholder="Tất cả khách hàng" />
+													<SelectValue placeholder="Tất cả khách hàng">
+														{discountForm.customerId
+															? (customers?.find((c) => c._id === discountForm.customerId)?.name ?? discountForm.customerId)
+															: "Tất cả khách hàng"}
+													</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="all-customers">
@@ -440,7 +444,11 @@ function DiscountsPage() {
 												}
 											>
 												<SelectTrigger>
-													<SelectValue placeholder="Tất cả sản phẩm" />
+													<SelectValue placeholder="Tất cả sản phẩm">
+														{discountForm.productId
+															? (products?.find((p) => p._id === discountForm.productId)?.name ?? discountForm.productId)
+															: "Tất cả sản phẩm"}
+													</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="all-products">
@@ -498,7 +506,11 @@ function DiscountsPage() {
 														}
 													>
 														<SelectTrigger>
-															<SelectValue placeholder="Chọn người nhận" />
+															<SelectValue placeholder="Chọn người nhận">
+																{discountForm[group.key].salesmanId
+																	? (salesmen?.find((s) => s._id === discountForm[group.key].salesmanId)?.name ?? discountForm[group.key].salesmanId)
+																	: "Chọn người nhận"}
+															</SelectValue>
 														</SelectTrigger>
 														<SelectContent>
 															{salesmen?.map((s) => (
