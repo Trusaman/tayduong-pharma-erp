@@ -659,10 +659,8 @@ function DiscountsPage() {
 												<TableCell className="text-right">
 													{rule.isActive ? (
 														<AlertDialog>
-															<AlertDialogTrigger asChild>
-																<Button size="sm" variant="secondary">
-																	Hoạt động
-																</Button>
+															<AlertDialogTrigger render={<Button size="sm" variant="secondary" />}>
+																Hoạt động
 															</AlertDialogTrigger>
 															<AlertDialogContent>
 																<AlertDialogHeader>
