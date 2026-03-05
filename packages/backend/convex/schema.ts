@@ -96,6 +96,7 @@ export default defineSchema({
 		productId: v.optional(v.id("products")),
 		salesmanId: v.id("salesmen"),
 		discountPercent: v.number(),
+		unitPrice: v.optional(v.number()),
 		createdByStaff: v.string(),
 		notes: v.optional(v.string()),
 		isActive: v.boolean(),
@@ -290,10 +291,7 @@ export default defineSchema({
 			v.literal("phó giám đốc"),
 			v.literal("giám đốc"),
 		),
-		trackingStatus: v.union(
-			v.literal("theo dõi"),
-			v.literal("ngừng theo dõi"),
-		),
+		trackingStatus: v.union(v.literal("theo dõi"), v.literal("ngừng theo dõi")),
 		joinedDate: v.number(), // timestamp
 		resignationDate: v.optional(v.number()), // timestamp, required when ngừng theo dõi
 		notes: v.optional(v.string()),
@@ -303,4 +301,3 @@ export default defineSchema({
 		.index("by_trackingStatus", ["trackingStatus"])
 		.index("by_position", ["position"]),
 });
-

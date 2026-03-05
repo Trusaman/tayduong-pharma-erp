@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import type { Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { Plus, Users } from "lucide-react";
+import { Plus, Trash2, Users } from "lucide-react";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -111,6 +111,7 @@ function DiscountsPage() {
 		name: "",
 		customerId: "",
 		productId: "",
+		unitPrice: "",
 		createdByStaff: "",
 		notes: "",
 		// Separate fields for each discount type
@@ -139,6 +140,7 @@ function DiscountsPage() {
 
 	const createSalesman = useMutation(api.salesmen.create);
 	const createDiscount = useMutation(api.discounts.create);
+	const removeDiscount = useMutation(api.discounts.remove);
 	const updateDiscount = useMutation(api.discounts.update);
 
 	const handleCreateSalesman = async (e: React.FormEvent) => {
@@ -165,6 +167,20 @@ function DiscountsPage() {
 	const handleCreateDiscount = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
+			const parsedUnitPrice = parseDecimalInput(discountForm.unitPrice);
+			if (
+				discountForm.unitPrice.trim() &&
+				typeof parsedUnitPrice !== "number"
+			) {
+				toast.error("Đơn giá không hợp lệ");
+				return;
+			}
+
+			if (typeof parsedUnitPrice === "number" && parsedUnitPrice < 0) {
+				toast.error("Đơn giá không được âm");
+				return;
+			}
+
 			const rulesToCreate: Array<{
 				discountType: (typeof discountTypes)[number];
 				salesmanId: Id<"salesmen">;
@@ -207,6 +223,7 @@ function DiscountsPage() {
 					productId: discountForm.productId
 						? (discountForm.productId as Id<"products">)
 						: undefined,
+					unitPrice: parsedUnitPrice,
 					salesmanId: rule.salesmanId,
 					discountPercent: rule.percent,
 					createdByStaff: discountForm.createdByStaff,
@@ -220,6 +237,7 @@ function DiscountsPage() {
 				name: "",
 				customerId: "",
 				productId: "",
+				unitPrice: "",
 				createdByStaff: "",
 				notes: "",
 				doctor: { salesmanId: "", percent: "" },
@@ -252,8 +270,59 @@ function DiscountsPage() {
 		}
 	};
 
+	const handleRemoveDiscount = async (id: Id<"discountRules">) => {
+		try {
+			await removeDiscount({ id });
+			toast.success("Đã xóa quy tắc chiết khấu");
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa quy tắc chiết khấu",
+			);
+		}
+	};
+
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
+
+	const formatDecimalNumber = (value: number) =>
+		new Intl.NumberFormat("vi-VN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		}).format(value);
+
+	const parseDecimalInput = (value: string): number | undefined => {
+		const trimmed = value.trim();
+		if (!trimmed) return undefined;
+
+		const cleaned = trimmed.replace(/\s+/g, "");
+		const lastCommaIndex = cleaned.lastIndexOf(",");
+		const lastDotIndex = cleaned.lastIndexOf(".");
+		const decimalIndex = Math.max(lastCommaIndex, lastDotIndex);
+
+		let normalized = cleaned;
+		if (decimalIndex >= 0) {
+			const integerPart = cleaned.slice(0, decimalIndex).replace(/[.,]/g, "");
+			const decimalPart = cleaned.slice(decimalIndex + 1).replace(/[.,]/g, "");
+			normalized = decimalPart ? `${integerPart}.${decimalPart}` : integerPart;
+		}
+
+		const parsed = Number(normalized);
+		if (!Number.isFinite(parsed)) return undefined;
+		return parsed;
+	};
+
+	const handleUnitPriceBlur = () => {
+		setDiscountForm((prev) => {
+			const parsed = parseDecimalInput(prev.unitPrice);
+			return {
+				...prev,
+				unitPrice:
+					typeof parsed === "number" ? formatDecimalNumber(parsed) : "",
+			};
+		});
+	};
 
 	const updateGroupField = (
 		groupKey: DiscountGroupKey,
@@ -426,7 +495,9 @@ function DiscountsPage() {
 												<SelectTrigger>
 													<SelectValue placeholder="Tất cả khách hàng">
 														{discountForm.customerId
-															? (customers?.find((c) => c._id === discountForm.customerId)?.name ?? discountForm.customerId)
+															? (customers?.find(
+																	(c) => c._id === discountForm.customerId,
+																)?.name ?? discountForm.customerId)
 															: "Tất cả khách hàng"}
 													</SelectValue>
 												</SelectTrigger>
@@ -457,7 +528,9 @@ function DiscountsPage() {
 												<SelectTrigger>
 													<SelectValue placeholder="Tất cả sản phẩm">
 														{discountForm.productId
-															? (products?.find((p) => p._id === discountForm.productId)?.name ?? discountForm.productId)
+															? (products?.find(
+																	(p) => p._id === discountForm.productId,
+																)?.name ?? discountForm.productId)
 															: "Tất cả sản phẩm"}
 													</SelectValue>
 												</SelectTrigger>
@@ -473,6 +546,22 @@ function DiscountsPage() {
 												</SelectContent>
 											</Select>
 										</div>
+									</div>
+
+									<div className="space-y-2">
+										<Label>Đơn giá (tùy chọn)</Label>
+										<Input
+											value={discountForm.unitPrice}
+											onChange={(e) =>
+												setDiscountForm({
+													...discountForm,
+													unitPrice: e.target.value.replace(/[^\d.,\s]/g, ""),
+												})
+											}
+											onBlur={handleUnitPriceBlur}
+											placeholder="VD: 125.000,50"
+											inputMode="decimal"
+										/>
 									</div>
 
 									{/* Discount types section */}
@@ -519,7 +608,12 @@ function DiscountsPage() {
 														<SelectTrigger>
 															<SelectValue placeholder="Chọn người nhận">
 																{discountForm[group.key].salesmanId
-																	? (salesmen?.find((s) => s._id === discountForm[group.key].salesmanId)?.name ?? discountForm[group.key].salesmanId)
+																	? (salesmen?.find(
+																			(s) =>
+																				s._id ===
+																				discountForm[group.key].salesmanId,
+																		)?.name ??
+																		discountForm[group.key].salesmanId)
 																	: "Chọn người nhận"}
 															</SelectValue>
 														</SelectTrigger>
@@ -536,7 +630,7 @@ function DiscountsPage() {
 													<Label className="opacity-0">Thành tiền</Label>
 													<div className="flex h-9 items-center text-muted-foreground text-sm">
 														{discountForm[group.key].percent &&
-															Number(discountForm[group.key].percent) > 0
+														Number(discountForm[group.key].percent) > 0
 															? "Sẽ tính khi có đơn hàng"
 															: "-"}
 													</div>
@@ -640,8 +734,16 @@ function DiscountsPage() {
 															: "Sản phẩm/Thuốc: Tất cả sản phẩm/thuốc"}
 													</div>
 												</TableCell>
-												<TableCell className="text-right">-</TableCell>
-												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">
+													{typeof rule.unitPrice === "number"
+														? `${formatDecimalNumber(rule.unitPrice)} đ`
+														: "-"}
+												</TableCell>
+												<TableCell className="text-right">
+													{typeof rule.unitPrice === "number"
+														? `${formatDecimalNumber((rule.unitPrice * rule.discountPercent) / 100)} đ`
+														: "-"}
+												</TableCell>
 												<TableCell className="text-right">-</TableCell>
 												{discountGroups.map((group) => {
 													const isActiveGroup = group.key === activeGroup;
@@ -662,39 +764,91 @@ function DiscountsPage() {
 												})}
 												<TableCell className="text-right">-</TableCell>
 												<TableCell className="text-right">
-													{rule.isActive ? (
+													<div className="flex justify-end gap-2">
+														{rule.isActive ? (
+															<AlertDialog>
+																<AlertDialogTrigger
+																	render={
+																		<Button size="sm" variant="secondary" />
+																	}
+																>
+																	Hoạt động
+																</AlertDialogTrigger>
+																<AlertDialogContent>
+																	<AlertDialogHeader>
+																		<AlertDialogTitle>
+																			Xác nhận tạm dừng
+																		</AlertDialogTitle>
+																		<AlertDialogDescription>
+																			Bạn có chắc muốn <strong>tạm dừng</strong>{" "}
+																			quy tắc chiết khấu{" "}
+																			<strong>"{rule.name}"</strong>? Chiết khấu
+																			này sẽ không được áp dụng cho các đơn hàng
+																			mới.
+																		</AlertDialogDescription>
+																	</AlertDialogHeader>
+																	<AlertDialogFooter>
+																		<AlertDialogCancel>Huỷ</AlertDialogCancel>
+																		<AlertDialogAction
+																			className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+																			onClick={() =>
+																				toggleRuleActive(
+																					rule._id,
+																					rule.isActive,
+																				)
+																			}
+																		>
+																			Tạm dừng
+																		</AlertDialogAction>
+																	</AlertDialogFooter>
+																</AlertDialogContent>
+															</AlertDialog>
+														) : (
+															<Button
+																size="sm"
+																variant="outline"
+																onClick={() =>
+																	toggleRuleActive(rule._id, rule.isActive)
+																}
+															>
+																Tạm dừng
+															</Button>
+														)}
 														<AlertDialog>
-															<AlertDialogTrigger render={<Button size="sm" variant="secondary" />}>
-																Hoạt động
+															<AlertDialogTrigger
+																render={
+																	<Button size="sm" variant="destructive" />
+																}
+															>
+																<Trash2 className="mr-1 h-3.5 w-3.5" />
+																Xóa
 															</AlertDialogTrigger>
 															<AlertDialogContent>
 																<AlertDialogHeader>
-																	<AlertDialogTitle>Xác nhận tạm dừng</AlertDialogTitle>
+																	<AlertDialogTitle>
+																		Xác nhận xóa chiết khấu
+																	</AlertDialogTitle>
 																	<AlertDialogDescription>
-																		Bạn có chắc muốn <strong>tạm dừng</strong> quy tắc chiết khấu{" "}
-																		<strong>"{rule.name}"</strong>? Chiết khấu này sẽ không được áp dụng cho các đơn hàng mới.
+																		Bạn có chắc muốn <strong>xóa</strong> quy
+																		tắc chiết khấu{" "}
+																		<strong>"{rule.name}"</strong>? Hành động
+																		này không thể hoàn tác.
 																	</AlertDialogDescription>
 																</AlertDialogHeader>
 																<AlertDialogFooter>
 																	<AlertDialogCancel>Huỷ</AlertDialogCancel>
 																	<AlertDialogAction
 																		className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-																		onClick={() => toggleRuleActive(rule._id, rule.isActive)}
+																		onClick={() =>
+																			handleRemoveDiscount(rule._id)
+																		}
 																	>
-																		Tạm dừng
+																		Xóa chiết khấu
 																	</AlertDialogAction>
 																</AlertDialogFooter>
 															</AlertDialogContent>
 														</AlertDialog>
-													) : (
-														<Button
-															size="sm"
-															variant="outline"
-															onClick={() => toggleRuleActive(rule._id, rule.isActive)}
-														>
-															Tạm dừng
-														</Button>
-													)}
+													</div>
 												</TableCell>
 											</TableRow>
 										);

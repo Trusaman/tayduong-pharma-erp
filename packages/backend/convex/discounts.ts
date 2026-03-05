@@ -15,6 +15,11 @@ function clampPercent(percent: number) {
 	return percent;
 }
 
+function clampAmount(amount: number) {
+	if (amount < 0) return 0;
+	return amount;
+}
+
 export const list = query({
 	args: {
 		activeOnly: v.optional(v.boolean()),
@@ -25,10 +30,10 @@ export const list = query({
 	handler: async (ctx, args) => {
 		const base = args.activeOnly
 			? await ctx.db
-				.query("discountRules")
-				.withIndex("by_active", (q) => q.eq("isActive", true))
-				.order("desc")
-				.collect()
+					.query("discountRules")
+					.withIndex("by_active", (q) => q.eq("isActive", true))
+					.order("desc")
+					.collect()
 			: await ctx.db.query("discountRules").order("desc").collect();
 
 		return base.filter((rule) => {
@@ -45,10 +50,10 @@ export const listWithDetails = query({
 	handler: async (ctx, args) => {
 		const rules = args.activeOnly
 			? await ctx.db
-				.query("discountRules")
-				.withIndex("by_active", (q) => q.eq("isActive", true))
-				.order("desc")
-				.collect()
+					.query("discountRules")
+					.withIndex("by_active", (q) => q.eq("isActive", true))
+					.order("desc")
+					.collect()
 			: await ctx.db.query("discountRules").order("desc").collect();
 
 		return await Promise.all(
@@ -74,6 +79,7 @@ export const create = mutation({
 		productId: v.optional(v.id("products")),
 		salesmanId: v.id("salesmen"),
 		discountPercent: v.number(),
+		unitPrice: v.optional(v.number()),
 		createdByStaff: v.string(),
 		notes: v.optional(v.string()),
 	},
@@ -86,6 +92,10 @@ export const create = mutation({
 			productId: args.productId,
 			salesmanId: args.salesmanId,
 			discountPercent: clampPercent(args.discountPercent),
+			unitPrice:
+				typeof args.unitPrice === "number"
+					? clampAmount(args.unitPrice)
+					: undefined,
 			createdByStaff: args.createdByStaff,
 			notes: args.notes,
 			isActive: true,
@@ -104,12 +114,13 @@ export const update = mutation({
 		productId: v.optional(v.id("products")),
 		salesmanId: v.optional(v.id("salesmen")),
 		discountPercent: v.optional(v.number()),
+		unitPrice: v.optional(v.number()),
 		createdByStaff: v.optional(v.string()),
 		notes: v.optional(v.string()),
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
-		const { id, discountPercent, ...rest } = args;
+		const { id, discountPercent, unitPrice, ...rest } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Discount rule not found");
 
@@ -117,6 +128,9 @@ export const update = mutation({
 			...rest,
 			...(typeof discountPercent === "number"
 				? { discountPercent: clampPercent(discountPercent) }
+				: {}),
+			...(typeof unitPrice === "number"
+				? { unitPrice: clampAmount(unitPrice) }
 				: {}),
 			updatedAt: Date.now(),
 		});
