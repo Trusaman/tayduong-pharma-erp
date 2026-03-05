@@ -634,6 +634,11 @@ function DiscountsPage() {
 													<div className="text-muted-foreground text-xs">
 														{rule.name}
 													</div>
+													<div className="text-muted-foreground text-xs">
+														{rule.product?.name
+															? `Sản phẩm/Thuốc: ${rule.product.name}`
+															: "Sản phẩm/Thuốc: Tất cả sản phẩm/thuốc"}
+													</div>
 												</TableCell>
 												<TableCell className="text-right">-</TableCell>
 												<TableCell className="text-right">-</TableCell>
