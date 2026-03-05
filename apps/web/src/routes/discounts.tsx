@@ -5,6 +5,17 @@ import { useMutation, useQuery } from "convex/react";
 import { Plus, Users } from "lucide-react";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -646,15 +657,41 @@ function DiscountsPage() {
 												})}
 												<TableCell className="text-right">-</TableCell>
 												<TableCell className="text-right">
-													<Button
-														size="sm"
-														variant={rule.isActive ? "secondary" : "outline"}
-														onClick={() =>
-															toggleRuleActive(rule._id, rule.isActive)
-														}
-													>
-														{rule.isActive ? "Hoạt động" : "Tạm dừng"}
-													</Button>
+													{rule.isActive ? (
+														<AlertDialog>
+															<AlertDialogTrigger asChild>
+																<Button size="sm" variant="secondary">
+																	Hoạt động
+																</Button>
+															</AlertDialogTrigger>
+															<AlertDialogContent>
+																<AlertDialogHeader>
+																	<AlertDialogTitle>Xác nhận tạm dừng</AlertDialogTitle>
+																	<AlertDialogDescription>
+																		Bạn có chắc muốn <strong>tạm dừng</strong> quy tắc chiết khấu{" "}
+																		<strong>"{rule.name}"</strong>? Chiết khấu này sẽ không được áp dụng cho các đơn hàng mới.
+																	</AlertDialogDescription>
+																</AlertDialogHeader>
+																<AlertDialogFooter>
+																	<AlertDialogCancel>Huỷ</AlertDialogCancel>
+																	<AlertDialogAction
+																		className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+																		onClick={() => toggleRuleActive(rule._id, rule.isActive)}
+																	>
+																		Tạm dừng
+																	</AlertDialogAction>
+																</AlertDialogFooter>
+															</AlertDialogContent>
+														</AlertDialog>
+													) : (
+														<Button
+															size="sm"
+															variant="outline"
+															onClick={() => toggleRuleActive(rule._id, rule.isActive)}
+														>
+															Tạm dừng
+														</Button>
+													)}
 												</TableCell>
 											</TableRow>
 										);

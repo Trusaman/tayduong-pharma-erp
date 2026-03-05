@@ -25,10 +25,10 @@ export const list = query({
 	handler: async (ctx, args) => {
 		const base = args.activeOnly
 			? await ctx.db
-					.query("discountRules")
-					.withIndex("by_active", (q) => q.eq("isActive", true))
-					.order("desc")
-					.collect()
+				.query("discountRules")
+				.withIndex("by_active", (q) => q.eq("isActive", true))
+				.order("desc")
+				.collect()
 			: await ctx.db.query("discountRules").order("desc").collect();
 
 		return base.filter((rule) => {
@@ -45,10 +45,10 @@ export const listWithDetails = query({
 	handler: async (ctx, args) => {
 		const rules = args.activeOnly
 			? await ctx.db
-					.query("discountRules")
-					.withIndex("by_active", (q) => q.eq("isActive", true))
-					.order("desc")
-					.collect()
+				.query("discountRules")
+				.withIndex("by_active", (q) => q.eq("isActive", true))
+				.order("desc")
+				.collect()
 			: await ctx.db.query("discountRules").order("desc").collect();
 
 		return await Promise.all(
@@ -109,16 +109,15 @@ export const update = mutation({
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
-		const { id, ...rest } = args;
+		const { id, discountPercent, ...rest } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Discount rule not found");
 
 		await ctx.db.patch(id, {
 			...rest,
-			discountPercent:
-				typeof args.discountPercent === "number"
-					? clampPercent(args.discountPercent)
-					: undefined,
+			...(typeof discountPercent === "number"
+				? { discountPercent: clampPercent(discountPercent) }
+				: {}),
 			updatedAt: Date.now(),
 		});
 
