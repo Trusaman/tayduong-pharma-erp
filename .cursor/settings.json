@@ -1,7 +1,7 @@
 {
-  "plugins": {
-    "convex": {
-      "enabled": true
-    }
-  }
+	"plugins": {
+		"convex": {
+			"enabled": true
+		}
+	}
 }

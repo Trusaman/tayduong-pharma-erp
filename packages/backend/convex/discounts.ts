@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { type MutationCtx, mutation, query } from "./_generated/server";
 
 const discountTypeValidator = v.union(
 	v.literal("Doctor"),
@@ -16,6 +17,85 @@ const discountTypeLabels = {
 	Salesman: "Chiết khấu NT, KD",
 	Manager: "Chiết khấu Quản lý",
 } as const;
+
+const importDiscountTypeCodeMap = {
+	DOCTOR: "Doctor",
+	HOSPITAL: "hospital",
+	PAYMENT: "payment",
+	SALESMAN: "Salesman",
+	MANAGER: "Manager",
+} as const;
+
+type DiscountTypeValue = keyof typeof discountTypeLabels;
+
+function normalizeLookupCode(value: string) {
+	return value.trim().toUpperCase();
+}
+
+function parseImportNumber(value: string, fieldName: string) {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		throw new Error(`${fieldName} không được để trống`);
+	}
+
+	const cleaned = trimmed.replace(/\s+/g, "");
+	if (!/^[\d.,]+$/.test(cleaned)) {
+		throw new Error(`${fieldName} không hợp lệ`);
+	}
+
+	const commaCount = cleaned.split(",").length - 1;
+	const dotCount = cleaned.split(".").length - 1;
+	let normalized = cleaned;
+
+	if (commaCount > 0 && dotCount > 0) {
+		const decimalSeparator =
+			cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".") ? "," : ".";
+		const separatorIndex = cleaned.lastIndexOf(decimalSeparator);
+		const integerPart = cleaned.slice(0, separatorIndex).replace(/[.,]/g, "");
+		const decimalPart = cleaned.slice(separatorIndex + 1).replace(/[.,]/g, "");
+		normalized = decimalPart ? `${integerPart}.${decimalPart}` : integerPart;
+	} else if (commaCount > 1 || dotCount > 1) {
+		normalized = cleaned.replace(commaCount > 1 ? /,/g : /\./g, "");
+	} else if (commaCount === 1 || dotCount === 1) {
+		const separator = commaCount === 1 ? "," : ".";
+		const separatorIndex = cleaned.lastIndexOf(separator);
+		const digitsAfter = cleaned.length - separatorIndex - 1;
+		const shouldTreatAsThousands =
+			digitsAfter === 3 && !cleaned.startsWith(`0${separator}`);
+
+		normalized = shouldTreatAsThousands
+			? cleaned.replace(separator === "," ? /,/g : /\./g, "")
+			: cleaned.replace(separator, ".");
+	}
+
+	const parsed = Number(normalized);
+	if (!Number.isFinite(parsed)) {
+		throw new Error(`${fieldName} không hợp lệ`);
+	}
+
+	return parsed;
+}
+
+function parseImportStatus(value: string) {
+	const normalized = normalizeLookupCode(value || "active");
+	if (
+		normalized === "ACTIVE" ||
+		normalized === "HOAT_DONG" ||
+		normalized === "HOATDONG"
+	) {
+		return true;
+	}
+
+	if (
+		normalized === "INACTIVE" ||
+		normalized === "TAM_DUNG" ||
+		normalized === "TAMDUNG"
+	) {
+		return false;
+	}
+
+	throw new Error(`Trạng thái không hợp lệ: ${value}`);
+}
 
 function clampPercent(percent: number) {
 	if (percent < 0) return 0;
@@ -36,7 +116,7 @@ function formatCurrencyValue(amount: number) {
 }
 
 async function formatHistoryValue(
-	ctx: any,
+	ctx: MutationCtx,
 	field: string,
 	value: unknown,
 ) {
@@ -46,17 +126,20 @@ async function formatHistoryValue(
 
 	switch (field) {
 		case "discountType":
-			return discountTypeLabels[value as keyof typeof discountTypeLabels] ?? String(value);
+			return (
+				discountTypeLabels[value as keyof typeof discountTypeLabels] ??
+				String(value)
+			);
 		case "customerId": {
-			const customer = await ctx.db.get(value as never);
+			const customer = await ctx.db.get(value as Id<"customers">);
 			return customer?.name ?? String(value);
 		}
 		case "productId": {
-			const product = await ctx.db.get(value as never);
+			const product = await ctx.db.get(value as Id<"products">);
 			return product?.name ?? String(value);
 		}
 		case "salesmanId": {
-			const salesman = await ctx.db.get(value as never);
+			const salesman = await ctx.db.get(value as Id<"salesmen">);
 			return salesman?.name ?? String(value);
 		}
 		case "discountPercent":
@@ -185,9 +268,13 @@ export const update = mutation({
 		const nextName = args.name ?? existing.name;
 		const nextDiscountType = args.discountType ?? existing.discountType;
 		const nextCustomerId =
-			args.customerId === undefined ? existing.customerId : args.customerId ?? undefined;
+			args.customerId === undefined
+				? existing.customerId
+				: (args.customerId ?? undefined);
 		const nextProductId =
-			args.productId === undefined ? existing.productId : args.productId ?? undefined;
+			args.productId === undefined
+				? existing.productId
+				: (args.productId ?? undefined);
 		const nextSalesmanId = args.salesmanId ?? existing.salesmanId;
 		const nextDiscountPercent =
 			typeof args.discountPercent === "number"
@@ -288,6 +375,214 @@ export const remove = mutation({
 	},
 });
 
+export const removeMany = mutation({
+	args: { ids: v.array(v.id("discountRules")) },
+	handler: async (ctx, args) => {
+		const uniqueIds = [...new Set(args.ids)];
+		for (const id of uniqueIds) {
+			await ctx.db.delete(id);
+		}
+
+		return { success: true, removedCount: uniqueIds.length };
+	},
+});
+
+export const importMany = mutation({
+	args: {
+		rows: v.array(
+			v.object({
+				name: v.string(),
+				discountTypeCode: v.string(),
+				discountTypeLabel: v.optional(v.string()),
+				customerCode: v.optional(v.string()),
+				customerName: v.optional(v.string()),
+				productSku: v.optional(v.string()),
+				productName: v.optional(v.string()),
+				salesmanCode: v.string(),
+				salesmanName: v.optional(v.string()),
+				discountPercent: v.string(),
+				unitPrice: v.optional(v.string()),
+				createdByStaff: v.string(),
+				notes: v.optional(v.string()),
+				status: v.optional(v.string()),
+			}),
+		),
+	},
+	handler: async (ctx, args) => {
+		if (args.rows.length === 0) {
+			throw new Error("File import không có dữ liệu");
+		}
+
+		const [customers, products, salesmen] = await Promise.all([
+			ctx.db.query("customers").collect(),
+			ctx.db.query("products").collect(),
+			ctx.db.query("salesmen").collect(),
+		]);
+
+		const customerByCode = new Map(
+			customers.map((item) => [normalizeLookupCode(item.code), item]),
+		);
+		const productBySku = new Map(
+			products.map((item) => [normalizeLookupCode(item.sku), item]),
+		);
+		const salesmanByCode = new Map(
+			salesmen.map((item) => [normalizeLookupCode(item.code), item]),
+		);
+
+		const errors: string[] = [];
+		const preparedRows: Array<{
+			name: string;
+			discountType: DiscountTypeValue;
+			customerId?: (typeof customers)[number]["_id"];
+			productId?: (typeof products)[number]["_id"];
+			salesmanId: (typeof salesmen)[number]["_id"];
+			discountPercent: number;
+			unitPrice?: number;
+			createdByStaff: string;
+			notes?: string;
+			isActive: boolean;
+		}> = [];
+
+		for (const [index, row] of args.rows.entries()) {
+			const rowNumber = index + 2;
+			try {
+				const ruleName = row.name.trim();
+				if (!ruleName) {
+					throw new Error("Tên quy tắc không được để trống");
+				}
+
+				const discountTypeCode = normalizeLookupCode(row.discountTypeCode);
+				const mappedDiscountType =
+					importDiscountTypeCodeMap[
+						discountTypeCode as keyof typeof importDiscountTypeCodeMap
+					];
+				if (!mappedDiscountType) {
+					throw new Error(
+						`Mã loại chiết khấu không hợp lệ: ${row.discountTypeCode}`,
+					);
+				}
+
+				const customerCode = row.customerCode?.trim() ?? "";
+				if (!customerCode && row.customerName?.trim()) {
+					throw new Error(
+						"Khách hàng phải dùng mã khách hàng, không import theo tên",
+					);
+				}
+
+				const productSku = row.productSku?.trim() ?? "";
+				if (!productSku && row.productName?.trim()) {
+					throw new Error("Sản phẩm phải dùng SKU, không import theo tên");
+				}
+
+				const customer = customerCode
+					? customerByCode.get(normalizeLookupCode(customerCode))
+					: undefined;
+				if (customerCode && !customer) {
+					throw new Error(`Không tìm thấy khách hàng theo mã: ${customerCode}`);
+				}
+
+				const product = productSku
+					? productBySku.get(normalizeLookupCode(productSku))
+					: undefined;
+				if (productSku && !product) {
+					throw new Error(`Không tìm thấy sản phẩm theo SKU: ${productSku}`);
+				}
+
+				const salesmanCode = row.salesmanCode.trim();
+				if (!salesmanCode) {
+					throw new Error("Mã người nhận chiết khấu không được để trống");
+				}
+				const salesman = salesmanByCode.get(normalizeLookupCode(salesmanCode));
+				if (!salesman) {
+					throw new Error(`Không tìm thấy người nhận theo mã: ${salesmanCode}`);
+				}
+
+				const discountPercent = parseImportNumber(
+					row.discountPercent,
+					"Tổng chiết khấu %",
+				);
+				if (discountPercent < 0 || discountPercent > 100) {
+					throw new Error(
+						"Tổng chiết khấu % phải nằm trong khoảng từ 0 đến 100",
+					);
+				}
+
+				const unitPriceRaw = row.unitPrice?.trim() ?? "";
+				const unitPrice = unitPriceRaw
+					? parseImportNumber(unitPriceRaw, "Đơn giá")
+					: undefined;
+				if (typeof unitPrice === "number" && unitPrice < 0) {
+					throw new Error("Đơn giá không được âm");
+				}
+
+				const createdByStaff = row.createdByStaff.trim();
+				if (!createdByStaff) {
+					throw new Error("Người tạo không được để trống");
+				}
+
+				const status = parseImportStatus(row.status ?? "active");
+
+				preparedRows.push({
+					name: ruleName,
+					discountType: mappedDiscountType,
+					customerId: customer?._id,
+					productId: product?._id,
+					salesmanId: salesman._id,
+					discountPercent,
+					unitPrice,
+					createdByStaff,
+					notes: row.notes?.trim() ? row.notes.trim() : undefined,
+					isActive: status,
+				});
+			} catch (error) {
+				errors.push(
+					`Dòng ${rowNumber}: ${error instanceof Error ? error.message : "Lỗi dữ liệu"}`,
+				);
+			}
+		}
+
+		if (errors.length > 0) {
+			throw new Error(`Dữ liệu import không hợp lệ:\n${errors.join("\n")}`);
+		}
+
+		let inactiveCount = 0;
+		for (const prepared of preparedRows) {
+			const now = Date.now();
+			const ruleId = await ctx.db.insert("discountRules", {
+				name: prepared.name,
+				discountType: prepared.discountType,
+				customerId: prepared.customerId,
+				productId: prepared.productId,
+				salesmanId: prepared.salesmanId,
+				discountPercent: clampPercent(prepared.discountPercent),
+				unitPrice:
+					typeof prepared.unitPrice === "number"
+						? clampAmount(prepared.unitPrice)
+						: undefined,
+				createdByStaff: prepared.createdByStaff,
+				notes: prepared.notes,
+				isActive: true,
+				createdAt: now,
+				updatedAt: now,
+			});
+
+			if (!prepared.isActive) {
+				inactiveCount += 1;
+				await ctx.db.patch(ruleId, {
+					isActive: false,
+					updatedAt: Date.now(),
+				});
+			}
+		}
+
+		return {
+			success: true,
+			createdCount: preparedRows.length,
+			inactiveCount,
+		};
+	},
+});
+
 export const getApplicableForOrder = query({
 	args: {
 		customerId: v.id("customers"),
@@ -310,9 +605,11 @@ export const getApplicableForOrder = query({
 			>;
 		}
 
+		const salesmanId = args.salesmanId;
+
 		const rules = await ctx.db
 			.query("discountRules")
-			.withIndex("by_salesman", (q) => q.eq("salesmanId", args.salesmanId!))
+			.withIndex("by_salesman", (q) => q.eq("salesmanId", salesmanId))
 			.filter((q) => q.eq(q.field("isActive"), true))
 			.collect();
 

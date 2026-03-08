@@ -5,12 +5,16 @@ import { useMutation, useQuery } from "convex/react";
 import {
 	ChevronDown,
 	ChevronUp,
+	Download,
+	FileSpreadsheet,
 	Pencil,
 	Plus,
+	Search,
 	Trash2,
+	Upload,
 	Users,
 } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
 	AlertDialog,
@@ -127,7 +131,69 @@ const groupToDiscountType: Record<
 	manager: "Manager",
 };
 
-const discountTableColumnCount = 3 + discountGroups.length * 3 + 2;
+const discountTableColumnCount = 1 + 3 + discountGroups.length * 3 + 2;
+
+const discountWorkbookColumns = {
+	ruleName: "Tên quy tắc",
+	discountTypeCode: "Mã loại chiết khấu",
+	discountTypeLabel: "Tên loại chiết khấu",
+	customerCode: "Mã khách hàng",
+	customerName: "Tên khách hàng",
+	productSku: "SKU thuốc",
+	productName: "Tên thuốc",
+	salesmanCode: "Mã người nhận",
+	salesmanName: "Tên người nhận",
+	totalDiscountPercent: "Tổng chiết khấu (%)",
+	unitPrice: "Đơn giá",
+	createdBy: "Người tạo",
+	notes: "Ghi chú",
+	status: "Trạng thái",
+} as const;
+
+const discountWorkbookHeaderOrder = [
+	discountWorkbookColumns.ruleName,
+	discountWorkbookColumns.discountTypeCode,
+	discountWorkbookColumns.discountTypeLabel,
+	discountWorkbookColumns.customerCode,
+	discountWorkbookColumns.customerName,
+	discountWorkbookColumns.productSku,
+	discountWorkbookColumns.productName,
+	discountWorkbookColumns.salesmanCode,
+	discountWorkbookColumns.salesmanName,
+	discountWorkbookColumns.totalDiscountPercent,
+	discountWorkbookColumns.unitPrice,
+	discountWorkbookColumns.createdBy,
+	discountWorkbookColumns.notes,
+	discountWorkbookColumns.status,
+] as const;
+
+const discountImportSheetName = "Nhap_lieu";
+
+const discountTypeCodeByValue: Record<(typeof discountTypes)[number], string> =
+	{
+		Doctor: "DOCTOR",
+		hospital: "HOSPITAL",
+		payment: "PAYMENT",
+		Salesman: "SALESMAN",
+		Manager: "MANAGER",
+	};
+
+type DiscountImportRowPayload = {
+	name: string;
+	discountTypeCode: string;
+	discountTypeLabel?: string;
+	customerCode?: string;
+	customerName?: string;
+	productSku?: string;
+	productName?: string;
+	salesmanCode: string;
+	salesmanName?: string;
+	discountPercent: string;
+	unitPrice?: string;
+	createdByStaff: string;
+	notes?: string;
+	status?: string;
+};
 
 const historyFieldLabels: Record<string, string> = {
 	name: "Tên quy tắc",
@@ -175,6 +241,9 @@ function DiscountsPage() {
 		useState<Id<"discountRules"> | null>(null);
 	const [editingRuleName, setEditingRuleName] = useState("");
 	const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([]);
+	const [search, setSearch] = useState("");
+	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
+	const importInputRef = useRef<HTMLInputElement | null>(null);
 	const [salesmanForm, setSalesmanForm] = useState({
 		name: "",
 		code: "",
@@ -197,6 +266,8 @@ function DiscountsPage() {
 	const createDiscount = useMutation(api.discounts.create);
 	const updateDiscount = useMutation(api.discounts.update);
 	const removeDiscount = useMutation(api.discounts.remove);
+	const removeManyDiscounts = useMutation(api.discounts.removeMany);
+	const importDiscounts = useMutation(api.discounts.importMany);
 
 	const editingRule = editingRuleId
 		? (rules?.find((rule) => rule._id === editingRuleId) ?? null)
@@ -214,23 +285,45 @@ function DiscountsPage() {
 	const formatPercentValue = (value: number) =>
 		`${formatDecimalNumber(value)}%`;
 
-	const parseDecimalInput = (value: string): number | undefined => {
+	const parseLocalizedNumber = (value: string): number | undefined => {
 		const trimmed = value.trim();
 		if (!trimmed) return undefined;
 		const cleaned = trimmed.replace(/\s+/g, "");
-		const decimalIndex = Math.max(
-			cleaned.lastIndexOf(","),
-			cleaned.lastIndexOf("."),
-		);
+		if (!/^[\d.,]+$/.test(cleaned)) return undefined;
+
+		const commaCount = cleaned.split(",").length - 1;
+		const dotCount = cleaned.split(".").length - 1;
 		let normalized = cleaned;
-		if (decimalIndex >= 0) {
-			const integerPart = cleaned.slice(0, decimalIndex).replace(/[.,]/g, "");
-			const decimalPart = cleaned.slice(decimalIndex + 1).replace(/[.,]/g, "");
+
+		if (commaCount > 0 && dotCount > 0) {
+			const decimalSeparator =
+				cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".") ? "," : ".";
+			const separatorIndex = cleaned.lastIndexOf(decimalSeparator);
+			const integerPart = cleaned.slice(0, separatorIndex).replace(/[.,]/g, "");
+			const decimalPart = cleaned
+				.slice(separatorIndex + 1)
+				.replace(/[.,]/g, "");
 			normalized = decimalPart ? `${integerPart}.${decimalPart}` : integerPart;
+		} else if (commaCount > 1 || dotCount > 1) {
+			normalized = cleaned.replace(commaCount > 1 ? /,/g : /\./g, "");
+		} else if (commaCount === 1 || dotCount === 1) {
+			const separator = commaCount === 1 ? "," : ".";
+			const separatorIndex = cleaned.lastIndexOf(separator);
+			const digitsAfter = cleaned.length - separatorIndex - 1;
+			const shouldTreatAsThousands =
+				digitsAfter === 3 && !cleaned.startsWith(`0${separator}`);
+
+			normalized = shouldTreatAsThousands
+				? cleaned.replace(separator === "," ? /,/g : /\./g, "")
+				: cleaned.replace(separator, ".");
 		}
+
 		const parsed = Number(normalized);
 		return Number.isFinite(parsed) ? parsed : undefined;
 	};
+
+	const parseDecimalInput = (value: string): number | undefined =>
+		parseLocalizedNumber(value);
 
 	const closeEditDialog = () => {
 		setEditDialogOpen(false);
@@ -414,6 +507,9 @@ function DiscountsPage() {
 	const handleRemoveDiscount = async (id: Id<"discountRules">) => {
 		try {
 			await removeDiscount({ id });
+			setSelectedRuleIds((prev) =>
+				prev.filter((ruleId) => ruleId !== String(id)),
+			);
 			toast.success("Đã xóa quy tắc chiết khấu");
 		} catch (error) {
 			toast.error(
@@ -421,6 +517,316 @@ function DiscountsPage() {
 					? error.message
 					: "Không thể xóa quy tắc chiết khấu",
 			);
+		}
+	};
+
+	const filteredRules = rules?.filter((rule) => {
+		const keyword = search.trim().toLowerCase();
+		if (!keyword) return true;
+		return (rule.product?.name ?? "").toLowerCase().includes(keyword);
+	});
+
+	const visibleRuleIds = (filteredRules ?? []).map((rule) => String(rule._id));
+	const visibleRuleIdsKey = visibleRuleIds.join("||");
+	const allVisibleSelected =
+		visibleRuleIds.length > 0 &&
+		visibleRuleIds.every((id) => selectedRuleIds.includes(id));
+
+	useEffect(() => {
+		const visibleIdSet = new Set(
+			visibleRuleIdsKey ? visibleRuleIdsKey.split("||") : [],
+		);
+
+		setSelectedRuleIds((prev) => prev.filter((id) => visibleIdSet.has(id)));
+	}, [visibleRuleIdsKey]);
+
+	const toggleRuleSelection = (ruleId: string, checked: boolean) => {
+		setSelectedRuleIds((prev) =>
+			checked
+				? prev.includes(ruleId)
+					? prev
+					: [...prev, ruleId]
+				: prev.filter((id) => id !== ruleId),
+		);
+	};
+
+	const toggleSelectAllVisible = (checked: boolean) => {
+		if (checked) {
+			setSelectedRuleIds((prev) => {
+				const next = new Set(prev);
+				for (const id of visibleRuleIds) next.add(id);
+				return [...next];
+			});
+			return;
+		}
+		setSelectedRuleIds((prev) =>
+			prev.filter((id) => !visibleRuleIds.includes(id)),
+		);
+	};
+
+	const handleRemoveSelectedDiscounts = async () => {
+		if (selectedRuleIds.length === 0) return;
+		try {
+			await removeManyDiscounts({
+				ids: selectedRuleIds as Id<"discountRules">[],
+			});
+			setSelectedRuleIds([]);
+			toast.success(`Đã xóa ${selectedRuleIds.length} quy tắc chiết khấu`);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa danh sách quy tắc chiết khấu",
+			);
+		}
+	};
+
+	const toCellString = (value: unknown) => {
+		if (value === null || value === undefined) return "";
+		if (typeof value === "number") return String(value);
+		if (typeof value === "string") return value.trim();
+		return String(value).trim();
+	};
+
+	const handleExportXlsx = async () => {
+		if (!filteredRules || filteredRules.length === 0) {
+			toast.error("Không có dữ liệu để xuất");
+			return;
+		}
+
+		try {
+			const XLSX = await import("xlsx");
+			const rows = filteredRules.map((rule) => ({
+				[discountWorkbookColumns.ruleName]: rule.name,
+				[discountWorkbookColumns.discountTypeCode]:
+					discountTypeCodeByValue[rule.discountType],
+				[discountWorkbookColumns.discountTypeLabel]:
+					discountTypeLabels[rule.discountType],
+				[discountWorkbookColumns.customerCode]: rule.customer?.code ?? "",
+				[discountWorkbookColumns.customerName]: rule.customer?.name ?? "",
+				[discountWorkbookColumns.productSku]: rule.product?.sku ?? "",
+				[discountWorkbookColumns.productName]: rule.product?.name ?? "",
+				[discountWorkbookColumns.salesmanCode]: rule.salesman?.code ?? "",
+				[discountWorkbookColumns.salesmanName]: rule.salesman?.name ?? "",
+				[discountWorkbookColumns.totalDiscountPercent]: rule.discountPercent,
+				[discountWorkbookColumns.unitPrice]:
+					typeof rule.unitPrice === "number" ? rule.unitPrice : "",
+				[discountWorkbookColumns.createdBy]: rule.createdByStaff,
+				[discountWorkbookColumns.notes]: rule.notes ?? "",
+				[discountWorkbookColumns.status]: rule.isActive ? "active" : "inactive",
+			}));
+
+			const worksheet = XLSX.utils.json_to_sheet(rows, {
+				header: [...discountWorkbookHeaderOrder],
+			});
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(
+				workbook,
+				worksheet,
+				discountImportSheetName,
+			);
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "discount-rules.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã xuất file XLSX");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể xuất file XLSX",
+			);
+		}
+	};
+
+	const handleDownloadTemplate = async () => {
+		try {
+			const XLSX = await import("xlsx");
+
+			const inputSheet = XLSX.utils.aoa_to_sheet([
+				[...discountWorkbookHeaderOrder],
+			]);
+
+			const exampleRows = [
+				{
+					[discountWorkbookColumns.ruleName]: "CK BS Cty A - AMOX500",
+					[discountWorkbookColumns.discountTypeCode]: "DOCTOR",
+					[discountWorkbookColumns.discountTypeLabel]: "Chiết khấu BS",
+					[discountWorkbookColumns.customerCode]: "KH001",
+					[discountWorkbookColumns.customerName]: "Nhà thuốc Minh Tâm",
+					[discountWorkbookColumns.productSku]: "AMOX500",
+					[discountWorkbookColumns.productName]: "Amoxicillin 500mg",
+					[discountWorkbookColumns.salesmanCode]: "NVKD01",
+					[discountWorkbookColumns.salesmanName]: "Nguyễn Văn A",
+					[discountWorkbookColumns.totalDiscountPercent]: 8,
+					[discountWorkbookColumns.unitPrice]: 125000,
+					[discountWorkbookColumns.createdBy]: "Phòng kinh doanh",
+					[discountWorkbookColumns.notes]: "Áp dụng quý 1",
+					[discountWorkbookColumns.status]: "active",
+				},
+				{
+					[discountWorkbookColumns.ruleName]: "CK thanh toán toàn hệ thống",
+					[discountWorkbookColumns.discountTypeCode]: "PAYMENT",
+					[discountWorkbookColumns.discountTypeLabel]: "Chiết khấu thanh toán",
+					[discountWorkbookColumns.customerCode]: "",
+					[discountWorkbookColumns.customerName]: "",
+					[discountWorkbookColumns.productSku]: "",
+					[discountWorkbookColumns.productName]: "",
+					[discountWorkbookColumns.salesmanCode]: "NVKD02",
+					[discountWorkbookColumns.salesmanName]: "Trần Thị B",
+					[discountWorkbookColumns.totalDiscountPercent]: 2.5,
+					[discountWorkbookColumns.unitPrice]: "",
+					[discountWorkbookColumns.createdBy]: "Kế toán",
+					[discountWorkbookColumns.notes]: "Áp dụng toàn bộ khách/sản phẩm",
+					[discountWorkbookColumns.status]: "inactive",
+				},
+			];
+
+			const exampleSheet = XLSX.utils.json_to_sheet(exampleRows, {
+				header: [...discountWorkbookHeaderOrder],
+			});
+
+			const guideSheet = XLSX.utils.aoa_to_sheet([
+				["Hướng dẫn import bảng chiết khấu"],
+				[
+					`1) Nhập dữ liệu vào sheet ${discountImportSheetName} theo đúng tiêu đề cột.`,
+				],
+				["2) Không đổi tên tiêu đề cột, không import theo tên nếu thiếu mã."],
+				["3) Mã khách hàng và SKU thuốc để trống nghĩa là áp dụng toàn cục."],
+				["4) Mã người nhận là bắt buộc."],
+				[
+					"5) discount type code hợp lệ: DOCTOR, HOSPITAL, PAYMENT, SALESMAN, MANAGER.",
+				],
+				[
+					"6) HOSPITAL và SALESMAN đều hiển thị tại nhóm Chiết khấu NT, KD trên giao diện.",
+				],
+				["7) status hợp lệ: active/inactive (chấp nhận hoat_dong/tam_dung)."],
+				["8) Tổng chiết khấu (%) từ 0 đến 100, Đơn giá >= 0 hoặc để trống."],
+			]);
+
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(
+				workbook,
+				inputSheet,
+				discountImportSheetName,
+			);
+			XLSX.utils.book_append_sheet(workbook, exampleSheet, "Vi_du");
+			XLSX.utils.book_append_sheet(workbook, guideSheet, "Huong_dan");
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "mau-import-chiet-khau.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã tải file mẫu XLSX");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể tạo file mẫu XLSX",
+			);
+		}
+	};
+
+	const handlePickImportFile = () => {
+		importInputRef.current?.click();
+	};
+
+	const handleImportXlsx = async (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		try {
+			const XLSX = await import("xlsx");
+			const fileBuffer = await file.arrayBuffer();
+			const workbook = XLSX.read(fileBuffer, { type: "array" });
+			const targetSheetName = workbook.SheetNames.find(
+				(sheetName) => sheetName === discountImportSheetName,
+			);
+			if (!targetSheetName) {
+				throw new Error(`File import phải có sheet ${discountImportSheetName}`);
+			}
+
+			const worksheet = workbook.Sheets[targetSheetName];
+			const headerRows = XLSX.utils.sheet_to_json<Array<string | number>>(
+				worksheet,
+				{
+					header: 1,
+					defval: "",
+				},
+			);
+			const headerRow = (headerRows[0] ?? []).map((cell) => toCellString(cell));
+			const missingHeaders = discountWorkbookHeaderOrder.filter(
+				(header) => !headerRow.includes(header),
+			);
+			if (missingHeaders.length > 0) {
+				throw new Error(`File import thiếu cột: ${missingHeaders.join(", ")}`);
+			}
+
+			const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+				worksheet,
+				{
+					defval: "",
+				},
+			);
+
+			const rows: DiscountImportRowPayload[] = rawRows
+				.map((row) => ({
+					name: toCellString(row[discountWorkbookColumns.ruleName]),
+					discountTypeCode: toCellString(
+						row[discountWorkbookColumns.discountTypeCode],
+					),
+					discountTypeLabel: toCellString(
+						row[discountWorkbookColumns.discountTypeLabel],
+					),
+					customerCode: toCellString(row[discountWorkbookColumns.customerCode]),
+					customerName: toCellString(row[discountWorkbookColumns.customerName]),
+					productSku: toCellString(row[discountWorkbookColumns.productSku]),
+					productName: toCellString(row[discountWorkbookColumns.productName]),
+					salesmanCode: toCellString(row[discountWorkbookColumns.salesmanCode]),
+					salesmanName: toCellString(row[discountWorkbookColumns.salesmanName]),
+					discountPercent: toCellString(
+						row[discountWorkbookColumns.totalDiscountPercent],
+					),
+					unitPrice: toCellString(row[discountWorkbookColumns.unitPrice]),
+					createdByStaff: toCellString(row[discountWorkbookColumns.createdBy]),
+					notes: toCellString(row[discountWorkbookColumns.notes]),
+					status: toCellString(row[discountWorkbookColumns.status]),
+				}))
+				.filter((row) =>
+					Object.values(row).some((value) =>
+						typeof value === "string" ? value.trim().length > 0 : false,
+					),
+				);
+
+			if (rows.length === 0) {
+				throw new Error("Sheet import không có dữ liệu hợp lệ");
+			}
+
+			const result = await importDiscounts({ rows });
+			toast.success(
+				`Import thành công ${result.createdCount} quy tắc (${result.inactiveCount} tạm dừng)`,
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể import file XLSX",
+			);
+		} finally {
+			event.target.value = "";
 		}
 	};
 
@@ -1013,7 +1419,71 @@ function DiscountsPage() {
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Danh sách chiết khấu</CardTitle>
+					<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+						<CardTitle>Danh sách chiết khấu</CardTitle>
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="relative w-64">
+								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+								<Input
+									value={search}
+									onChange={(e) => setSearch(e.target.value)}
+									placeholder="Tìm theo tên sản phẩm/thuốc"
+									className="pl-8"
+								/>
+							</div>
+							<Button variant="outline" onClick={handleExportXlsx}>
+								<Download className="mr-2 h-4 w-4" />
+								Xuất XLSX
+							</Button>
+							<Button variant="outline" onClick={handlePickImportFile}>
+								<Upload className="mr-2 h-4 w-4" />
+								Nhập XLSX
+							</Button>
+							<Button variant="outline" onClick={handleDownloadTemplate}>
+								<FileSpreadsheet className="mr-2 h-4 w-4" />
+								Tải mẫu XLSX
+							</Button>
+							<AlertDialog>
+								<AlertDialogTrigger
+									render={
+										<Button
+											variant="destructive"
+											disabled={selectedRuleIds.length === 0}
+										/>
+									}
+								>
+									<Trash2 className="mr-2 h-4 w-4" />
+									Xóa đã chọn ({selectedRuleIds.length})
+								</AlertDialogTrigger>
+								<AlertDialogContent>
+									<AlertDialogHeader>
+										<AlertDialogTitle>Xác nhận xóa hàng loạt</AlertDialogTitle>
+										<AlertDialogDescription>
+											Bạn có chắc muốn xóa{" "}
+											<strong>{selectedRuleIds.length}</strong> quy tắc chiết
+											khấu đã chọn?
+										</AlertDialogDescription>
+									</AlertDialogHeader>
+									<AlertDialogFooter>
+										<AlertDialogCancel>Huỷ</AlertDialogCancel>
+										<AlertDialogAction
+											className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+											onClick={handleRemoveSelectedDiscounts}
+										>
+											Xóa đã chọn
+										</AlertDialogAction>
+									</AlertDialogFooter>
+								</AlertDialogContent>
+							</AlertDialog>
+							<input
+								type="file"
+								ref={importInputRef}
+								onChange={handleImportXlsx}
+								accept=".xlsx,.xls"
+								className="hidden"
+							/>
+						</div>
+					</div>
 				</CardHeader>
 				<CardContent>
 					{rules === undefined ? (
@@ -1022,11 +1492,25 @@ function DiscountsPage() {
 						<div className="text-muted-foreground">
 							Chưa có quy tắc chiết khấu nào
 						</div>
+					) : !filteredRules || filteredRules.length === 0 ? (
+						<div className="text-muted-foreground">
+							Không tìm thấy quy tắc theo tên sản phẩm/thuốc
+						</div>
 					) : (
 						<div className="overflow-x-auto">
 							<Table>
 								<TableHeader>
 									<TableRow>
+										<TableHead rowSpan={2} className="w-12 text-center">
+											<input
+												type="checkbox"
+												checked={allVisibleSelected}
+												onChange={(e) =>
+													toggleSelectAllVisible(e.target.checked)
+												}
+												disabled={visibleRuleIds.length === 0}
+											/>
+										</TableHead>
 										<TableHead rowSpan={2}>Ngày hạch toán</TableHead>
 										<TableHead rowSpan={2} className="text-right">
 											Đơn giá
@@ -1063,13 +1547,16 @@ function DiscountsPage() {
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{rules.map((rule) => {
+									{filteredRules.map((rule) => {
 										const activeGroup = discountTypeToGroup[rule.discountType];
 										const ruleUnitPrice =
 											typeof rule.unitPrice === "number"
 												? rule.unitPrice
 												: rule.product?.salePrice;
 										const isExpanded = expandedRuleIds.includes(
+											String(rule._id),
+										);
+										const isSelected = selectedRuleIds.includes(
 											String(rule._id),
 										);
 										const historyEntries = [...rule.editHistory].sort(
@@ -1079,6 +1566,18 @@ function DiscountsPage() {
 										return (
 											<Fragment key={rule._id}>
 												<TableRow>
+													<TableCell className="text-center">
+														<input
+															type="checkbox"
+															checked={isSelected}
+															onChange={(e) =>
+																toggleRuleSelection(
+																	String(rule._id),
+																	e.target.checked,
+																)
+															}
+														/>
+													</TableCell>
 													<TableCell>
 														<div className="font-medium">
 															{formatDate(rule.createdAt)}
