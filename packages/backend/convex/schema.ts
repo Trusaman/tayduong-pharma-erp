@@ -99,6 +99,21 @@ export default defineSchema({
 		unitPrice: v.optional(v.number()),
 		createdByStaff: v.string(),
 		notes: v.optional(v.string()),
+		editHistory: v.optional(
+			v.array(
+				v.object({
+					editedAt: v.number(),
+					editedBy: v.string(),
+					changes: v.array(
+						v.object({
+							field: v.string(),
+							from: v.optional(v.string()),
+							to: v.optional(v.string()),
+						}),
+					),
+				}),
+			),
+		),
 		isActive: v.boolean(),
 		createdAt: v.number(),
 		updatedAt: v.number(),

@@ -9,6 +9,14 @@ const discountTypeValidator = v.union(
 	v.literal("Manager"),
 );
 
+const discountTypeLabels = {
+	Doctor: "Chiết khấu BS",
+	hospital: "Chiết khấu NT, KD",
+	payment: "Chiết khấu thanh toán",
+	Salesman: "Chiết khấu NT, KD",
+	Manager: "Chiết khấu Quản lý",
+} as const;
+
 function clampPercent(percent: number) {
 	if (percent < 0) return 0;
 	if (percent > 100) return 100;
@@ -18,6 +26,48 @@ function clampPercent(percent: number) {
 function clampAmount(amount: number) {
 	if (amount < 0) return 0;
 	return amount;
+}
+
+function formatCurrencyValue(amount: number) {
+	return `${new Intl.NumberFormat("vi-VN", {
+		minimumFractionDigits: 0,
+		maximumFractionDigits: 2,
+	}).format(amount)} đ`;
+}
+
+async function formatHistoryValue(
+	ctx: any,
+	field: string,
+	value: unknown,
+) {
+	if (value === undefined || value === null || value === "") {
+		return undefined;
+	}
+
+	switch (field) {
+		case "discountType":
+			return discountTypeLabels[value as keyof typeof discountTypeLabels] ?? String(value);
+		case "customerId": {
+			const customer = await ctx.db.get(value as never);
+			return customer?.name ?? String(value);
+		}
+		case "productId": {
+			const product = await ctx.db.get(value as never);
+			return product?.name ?? String(value);
+		}
+		case "salesmanId": {
+			const salesman = await ctx.db.get(value as never);
+			return salesman?.name ?? String(value);
+		}
+		case "discountPercent":
+			return `${clampPercent(Number(value))}%`;
+		case "unitPrice":
+			return formatCurrencyValue(clampAmount(Number(value)));
+		case "isActive":
+			return value ? "Hoạt động" : "Tạm dừng";
+		default:
+			return String(value);
+	}
 }
 
 export const list = query({
@@ -65,7 +115,13 @@ export const listWithDetails = query({
 					? await ctx.db.get(rule.productId)
 					: null;
 				const salesman = await ctx.db.get(rule.salesmanId);
-				return { ...rule, customer, product, salesman };
+				return {
+					...rule,
+					customer,
+					product,
+					salesman,
+					editHistory: rule.editHistory ?? [],
+				};
 			}),
 		);
 	},
@@ -114,25 +170,110 @@ export const update = mutation({
 		productId: v.optional(v.id("products")),
 		salesmanId: v.optional(v.id("salesmen")),
 		discountPercent: v.optional(v.number()),
-		unitPrice: v.optional(v.number()),
+		unitPrice: v.optional(v.union(v.number(), v.null())),
 		createdByStaff: v.optional(v.string()),
-		notes: v.optional(v.string()),
+		updatedByStaff: v.optional(v.string()),
+		notes: v.optional(v.union(v.string(), v.null())),
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
-		const { id, discountPercent, unitPrice, ...rest } = args;
+		const { id, updatedByStaff } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Discount rule not found");
 
+		const now = Date.now();
+		const nextName = args.name ?? existing.name;
+		const nextDiscountType = args.discountType ?? existing.discountType;
+		const nextCustomerId =
+			args.customerId === undefined ? existing.customerId : args.customerId ?? undefined;
+		const nextProductId =
+			args.productId === undefined ? existing.productId : args.productId ?? undefined;
+		const nextSalesmanId = args.salesmanId ?? existing.salesmanId;
+		const nextDiscountPercent =
+			typeof args.discountPercent === "number"
+				? clampPercent(args.discountPercent)
+				: existing.discountPercent;
+		const nextUnitPrice =
+			args.unitPrice === undefined
+				? existing.unitPrice
+				: args.unitPrice === null
+					? undefined
+					: clampAmount(args.unitPrice);
+		const nextCreatedByStaff = args.createdByStaff ?? existing.createdByStaff;
+		const nextNotes =
+			args.notes === undefined
+				? existing.notes
+				: args.notes?.trim()
+					? args.notes.trim()
+					: undefined;
+		const nextIsActive =
+			typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
+
+		const changes: Array<{
+			field: string;
+			from?: string;
+			to?: string;
+		}> = [];
+
+		const pushChange = async (
+			field: string,
+			previous: unknown,
+			next: unknown,
+		) => {
+			if (previous === next) return;
+
+			changes.push({
+				field,
+				from: await formatHistoryValue(ctx, field, previous),
+				to: await formatHistoryValue(ctx, field, next),
+			});
+		};
+
+		await pushChange("name", existing.name, nextName);
+		await pushChange("discountType", existing.discountType, nextDiscountType);
+		await pushChange("customerId", existing.customerId, nextCustomerId);
+		await pushChange("productId", existing.productId, nextProductId);
+		await pushChange("salesmanId", existing.salesmanId, nextSalesmanId);
+		await pushChange(
+			"discountPercent",
+			existing.discountPercent,
+			nextDiscountPercent,
+		);
+		await pushChange("unitPrice", existing.unitPrice, nextUnitPrice);
+		await pushChange(
+			"createdByStaff",
+			existing.createdByStaff,
+			nextCreatedByStaff,
+		);
+		await pushChange("notes", existing.notes, nextNotes);
+		await pushChange("isActive", existing.isActive, nextIsActive);
+
+		const editorName = updatedByStaff?.trim();
+
 		await ctx.db.patch(id, {
-			...rest,
-			...(typeof discountPercent === "number"
-				? { discountPercent: clampPercent(discountPercent) }
+			name: nextName,
+			discountType: nextDiscountType,
+			customerId: nextCustomerId,
+			productId: nextProductId,
+			salesmanId: nextSalesmanId,
+			discountPercent: nextDiscountPercent,
+			unitPrice: nextUnitPrice,
+			createdByStaff: nextCreatedByStaff,
+			notes: nextNotes,
+			isActive: nextIsActive,
+			...(editorName && changes.length > 0
+				? {
+						editHistory: [
+							...(existing.editHistory ?? []),
+							{
+								editedAt: now,
+								editedBy: editorName,
+								changes,
+							},
+						],
+					}
 				: {}),
-			...(typeof unitPrice === "number"
-				? { unitPrice: clampAmount(unitPrice) }
-				: {}),
-			updatedAt: Date.now(),
+			updatedAt: now,
 		});
 
 		return await ctx.db.get(id);
