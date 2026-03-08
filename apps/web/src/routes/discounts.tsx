@@ -211,6 +211,8 @@ function DiscountsPage() {
 			minimumFractionDigits: 0,
 			maximumFractionDigits: 2,
 		}).format(value);
+	const formatPercentValue = (value: number) =>
+		`${formatDecimalNumber(value)}%`;
 
 	const parseDecimalInput = (value: string): number | undefined => {
 		const trimmed = value.trim();
@@ -526,6 +528,13 @@ function DiscountsPage() {
 		updateGroupField(groupKey, "salesmanId", value);
 	};
 
+	const totalDiscountPercent = discountGroups.reduce((total, group) => {
+		const groupPercent = Number(discountForm[group.key].percent);
+		return Number.isFinite(groupPercent) && groupPercent > 0
+			? total + groupPercent
+			: total;
+	}, 0);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -775,16 +784,30 @@ function DiscountsPage() {
 													</Select>
 												</div>
 												<div className="space-y-2">
-													<Label className="opacity-0">Thành tiền</Label>
+													<Label>Tổng chiết khấu %</Label>
 													<div className="flex h-9 items-center text-muted-foreground text-sm">
 														{discountForm[group.key].percent &&
 														Number(discountForm[group.key].percent) > 0
-															? "Sẽ tính khi có đơn hàng"
+															? formatPercentValue(
+																	Number(discountForm[group.key].percent),
+																)
 															: "-"}
 													</div>
 												</div>
 											</div>
 										))}
+										<div className="flex items-center justify-end border-t pt-4">
+											<div className="text-right">
+												<div className="text-muted-foreground text-xs">
+													Tổng chiết khấu %
+												</div>
+												<div className="font-medium text-sm">
+													{totalDiscountPercent > 0
+														? formatPercentValue(totalDiscountPercent)
+														: "-"}
+												</div>
+											</div>
+										</div>
 									</div>
 									<div className="space-y-2">
 										<Label>Ghi chú</Label>
@@ -1046,10 +1069,6 @@ function DiscountsPage() {
 											typeof rule.unitPrice === "number"
 												? rule.unitPrice
 												: rule.product?.salePrice;
-										const unitDiscountAmount =
-											typeof ruleUnitPrice === "number"
-												? (ruleUnitPrice * rule.discountPercent) / 100
-												: undefined;
 										const isExpanded = expandedRuleIds.includes(
 											String(rule._id),
 										);
@@ -1079,9 +1098,7 @@ function DiscountsPage() {
 															: "-"}
 													</TableCell>
 													<TableCell className="text-right">
-														{typeof unitDiscountAmount === "number"
-															? `${formatDecimalNumber(unitDiscountAmount)} đ`
-															: "-"}
+														{formatPercentValue(rule.discountPercent)}
 													</TableCell>
 													{discountGroups.map((group) => {
 														const isActiveGroup = group.key === activeGroup;
@@ -1089,7 +1106,7 @@ function DiscountsPage() {
 															<Fragment key={`${rule._id}-${group.key}`}>
 																<TableCell className="text-right">
 																	{isActiveGroup
-																		? `${rule.discountPercent}%`
+																		? formatPercentValue(rule.discountPercent)
 																		: "0%"}
 																</TableCell>
 																<TableCell className="text-right">-</TableCell>
@@ -1102,7 +1119,9 @@ function DiscountsPage() {
 															</Fragment>
 														);
 													})}
-													<TableCell className="text-right">-</TableCell>
+													<TableCell className="text-right">
+														{formatPercentValue(rule.discountPercent)}
+													</TableCell>
 													<TableCell className="text-right">
 														<div className="space-y-2">
 															<div
