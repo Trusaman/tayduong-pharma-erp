@@ -127,7 +127,7 @@ const groupToDiscountType: Record<
 	manager: "Manager",
 };
 
-const discountTableColumnCount = 4 + discountGroups.length * 3 + 2;
+const discountTableColumnCount = 3 + discountGroups.length * 3 + 2;
 
 const historyFieldLabels: Record<string, string> = {
 	name: "Tên quy tắc",
@@ -181,11 +181,11 @@ function DiscountsPage() {
 		phone: "",
 		notes: "",
 	});
-	const [discountForm, setDiscountForm] =
-		useState<DiscountFormState>(createEmptyDiscountForm);
-	const [editForm, setEditForm] = useState<EditDiscountFormState>(
-		createEmptyEditForm,
+	const [discountForm, setDiscountForm] = useState<DiscountFormState>(
+		createEmptyDiscountForm,
 	);
+	const [editForm, setEditForm] =
+		useState<EditDiscountFormState>(createEmptyEditForm);
 
 	const salesmen = useQuery(api.salesmen.list, { activeOnly: true });
 	const customers = useQuery(api.customers.list, { activeOnly: true });
@@ -199,7 +199,7 @@ function DiscountsPage() {
 	const removeDiscount = useMutation(api.discounts.remove);
 
 	const editingRule = editingRuleId
-		? rules?.find((rule) => rule._id === editingRuleId) ?? null
+		? (rules?.find((rule) => rule._id === editingRuleId) ?? null)
 		: null;
 
 	const formatDate = (timestamp: number) =>
@@ -260,7 +260,10 @@ function DiscountsPage() {
 		e.preventDefault();
 		try {
 			const parsedUnitPrice = parseDecimalInput(discountForm.unitPrice);
-			if (discountForm.unitPrice.trim() && typeof parsedUnitPrice !== "number") {
+			if (
+				discountForm.unitPrice.trim() &&
+				typeof parsedUnitPrice !== "number"
+			) {
 				toast.error("Đơn giá không hợp lệ");
 				return;
 			}
@@ -277,7 +280,11 @@ function DiscountsPage() {
 
 			for (const group of discountGroups) {
 				const groupData = discountForm[group.key];
-				if (groupData.percent && Number(groupData.percent) > 0 && groupData.salesmanId) {
+				if (
+					groupData.percent &&
+					Number(groupData.percent) > 0 &&
+					groupData.salesmanId
+				) {
 					rulesToCreate.push({
 						discountType: groupToDiscountType[group.key],
 						salesmanId: groupData.salesmanId as Id<"salesmen">,
@@ -420,7 +427,8 @@ function DiscountsPage() {
 			const parsed = parseDecimalInput(prev.unitPrice);
 			return {
 				...prev,
-				unitPrice: typeof parsed === "number" ? formatDecimalNumber(parsed) : "",
+				unitPrice:
+					typeof parsed === "number" ? formatDecimalNumber(parsed) : "",
 			};
 		});
 
@@ -429,7 +437,8 @@ function DiscountsPage() {
 			const parsed = parseDecimalInput(prev.unitPrice);
 			return {
 				...prev,
-				unitPrice: typeof parsed === "number" ? formatDecimalNumber(parsed) : "",
+				unitPrice:
+					typeof parsed === "number" ? formatDecimalNumber(parsed) : "",
 			};
 		});
 
@@ -527,7 +536,10 @@ function DiscountsPage() {
 					</p>
 				</div>
 				<div className="flex gap-2">
-					<Dialog open={salesmanDialogOpen} onOpenChange={setSalesmanDialogOpen}>
+					<Dialog
+						open={salesmanDialogOpen}
+						onOpenChange={setSalesmanDialogOpen}
+					>
 						<DialogTrigger asChild>
 							<Button variant="outline">
 								<Users className="mr-2 h-4 w-4" />
@@ -547,7 +559,10 @@ function DiscountsPage() {
 											<Input
 												value={salesmanForm.name}
 												onChange={(e) =>
-													setSalesmanForm({ ...salesmanForm, name: e.target.value })
+													setSalesmanForm({
+														...salesmanForm,
+														name: e.target.value,
+													})
 												}
 												required
 											/>
@@ -557,7 +572,10 @@ function DiscountsPage() {
 											<Input
 												value={salesmanForm.code}
 												onChange={(e) =>
-													setSalesmanForm({ ...salesmanForm, code: e.target.value })
+													setSalesmanForm({
+														...salesmanForm,
+														code: e.target.value,
+													})
 												}
 												required
 											/>
@@ -569,7 +587,10 @@ function DiscountsPage() {
 											<Input
 												value={salesmanForm.phone}
 												onChange={(e) =>
-													setSalesmanForm({ ...salesmanForm, phone: e.target.value })
+													setSalesmanForm({
+														...salesmanForm,
+														phone: e.target.value,
+													})
 												}
 											/>
 										</div>
@@ -578,7 +599,10 @@ function DiscountsPage() {
 											<Input
 												value={salesmanForm.notes}
 												onChange={(e) =>
-													setSalesmanForm({ ...salesmanForm, notes: e.target.value })
+													setSalesmanForm({
+														...salesmanForm,
+														notes: e.target.value,
+													})
 												}
 											/>
 										</div>
@@ -591,7 +615,10 @@ function DiscountsPage() {
 						</DialogContent>
 					</Dialog>
 
-					<Dialog open={discountDialogOpen} onOpenChange={setDiscountDialogOpen}>
+					<Dialog
+						open={discountDialogOpen}
+						onOpenChange={setDiscountDialogOpen}
+					>
 						<DialogTrigger asChild>
 							<Button>
 								<Plus className="mr-2 h-4 w-4" />
@@ -613,7 +640,10 @@ function DiscountsPage() {
 											<Input
 												value={discountForm.name}
 												onChange={(e) =>
-													setDiscountForm({ ...discountForm, name: e.target.value })
+													setDiscountForm({
+														...discountForm,
+														name: e.target.value,
+													})
 												}
 												placeholder="Tự động nếu để trống"
 											/>
@@ -694,7 +724,10 @@ function DiscountsPage() {
 									<div className="space-y-4 rounded-lg border p-4">
 										<h4 className="font-medium text-sm">Chi tiết chiết khấu</h4>
 										{discountGroups.map((group) => (
-											<div key={group.key} className="grid grid-cols-3 items-end gap-4">
+											<div
+												key={group.key}
+												className="grid grid-cols-3 items-end gap-4"
+											>
 												<div className="space-y-2">
 													<Label>{group.label}</Label>
 													<div className="flex items-center gap-2">
@@ -705,11 +738,17 @@ function DiscountsPage() {
 															step="0.01"
 															value={discountForm[group.key].percent}
 															onChange={(e) =>
-																updateGroupField(group.key, "percent", e.target.value)
+																updateGroupField(
+																	group.key,
+																	"percent",
+																	e.target.value,
+																)
 															}
 															className="w-24"
 														/>
-														<span className="text-muted-foreground text-sm">%</span>
+														<span className="text-muted-foreground text-sm">
+															%
+														</span>
 													</div>
 												</div>
 												<div className="space-y-2">
@@ -725,7 +764,10 @@ function DiscountsPage() {
 														</SelectTrigger>
 														<SelectContent>
 															{salesmen?.map((salesman) => (
-																<SelectItem key={salesman._id} value={salesman._id}>
+																<SelectItem
+																	key={salesman._id}
+																	value={salesman._id}
+																>
 																	{salesman.name}
 																</SelectItem>
 															))}
@@ -749,7 +791,10 @@ function DiscountsPage() {
 										<Textarea
 											value={discountForm.notes}
 											onChange={(e) =>
-												setDiscountForm({ ...discountForm, notes: e.target.value })
+												setDiscountForm({
+													...discountForm,
+													notes: e.target.value,
+												})
 											}
 										/>
 									</div>
@@ -772,7 +817,8 @@ function DiscountsPage() {
 						<DialogHeader>
 							<DialogTitle>Chỉnh sửa chiết khấu</DialogTitle>
 							<DialogDescription>
-								Cập nhật quy tắc <strong>{editingRuleName || "đang chọn"}</strong>.
+								Cập nhật quy tắc{" "}
+								<strong>{editingRuleName || "đang chọn"}</strong>.
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
@@ -791,7 +837,9 @@ function DiscountsPage() {
 									<Label>Loại chiết khấu</Label>
 									<Input
 										value={
-											editingRule ? discountTypeLabels[editingRule.discountType] : ""
+											editingRule
+												? discountTypeLabels[editingRule.discountType]
+												: ""
 										}
 										readOnly
 									/>
@@ -836,7 +884,9 @@ function DiscountsPage() {
 											<SelectValue placeholder="Tất cả khách hàng" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="all-customers">Tất cả khách hàng</SelectItem>
+											<SelectItem value="all-customers">
+												Tất cả khách hàng
+											</SelectItem>
 											{customers?.map((customer) => (
 												<SelectItem key={customer._id} value={customer._id}>
 													{customer.name}
@@ -855,7 +905,9 @@ function DiscountsPage() {
 											<SelectValue placeholder="Tất cả sản phẩm" />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="all-products">Tất cả sản phẩm</SelectItem>
+											<SelectItem value="all-products">
+												Tất cả sản phẩm
+											</SelectItem>
 											{products?.map((product) => (
 												<SelectItem key={product._id} value={product._id}>
 													{product.name}
@@ -957,10 +1009,7 @@ function DiscountsPage() {
 											Đơn giá
 										</TableHead>
 										<TableHead rowSpan={2} className="text-right">
-											Chiết khấu/Lọ, viên
-										</TableHead>
-										<TableHead rowSpan={2} className="text-right">
-											Tổng doanh số
+											Tổng chiết khấu (%)
 										</TableHead>
 										{discountGroups.map((group) => (
 											<TableHead
@@ -1001,7 +1050,9 @@ function DiscountsPage() {
 											typeof ruleUnitPrice === "number"
 												? (ruleUnitPrice * rule.discountPercent) / 100
 												: undefined;
-										const isExpanded = expandedRuleIds.includes(String(rule._id));
+										const isExpanded = expandedRuleIds.includes(
+											String(rule._id),
+										);
 										const historyEntries = [...rule.editHistory].sort(
 											(a, b) => b.editedAt - a.editedAt,
 										);
@@ -1032,7 +1083,6 @@ function DiscountsPage() {
 															? `${formatDecimalNumber(unitDiscountAmount)} đ`
 															: "-"}
 													</TableCell>
-													<TableCell className="text-right">-</TableCell>
 													{discountGroups.map((group) => {
 														const isActiveGroup = group.key === activeGroup;
 														return (
@@ -1045,7 +1095,8 @@ function DiscountsPage() {
 																<TableCell className="text-right">-</TableCell>
 																<TableCell className="text-center">
 																	{isActiveGroup
-																		? (rule.salesman?.name ?? rule.createdByStaff)
+																		? (rule.salesman?.name ??
+																			rule.createdByStaff)
 																		: ""}
 																</TableCell>
 															</Fragment>
@@ -1078,7 +1129,9 @@ function DiscountsPage() {
 																</Button>
 																<AlertDialog>
 																	<AlertDialogTrigger
-																		render={<Button size="sm" variant="outline" />}
+																		render={
+																			<Button size="sm" variant="outline" />
+																		}
 																	>
 																		<Pencil className="mr-1 h-3.5 w-3.5" />
 																		Sửa
@@ -1090,8 +1143,9 @@ function DiscountsPage() {
 																			</AlertDialogTitle>
 																			<AlertDialogDescription>
 																				Bạn sắp chỉnh sửa quy tắc{" "}
-																				<strong>"{rule.name}"</strong>. Hệ thống sẽ
-																				lưu lại lịch sử thay đổi sau khi bạn lưu.
+																				<strong>"{rule.name}"</strong>. Hệ thống
+																				sẽ lưu lại lịch sử thay đổi sau khi bạn
+																				lưu.
 																			</AlertDialogDescription>
 																		</AlertDialogHeader>
 																		<AlertDialogFooter>
@@ -1119,12 +1173,15 @@ function DiscountsPage() {
 																					Xác nhận tạm dừng
 																				</AlertDialogTitle>
 																				<AlertDialogDescription>
-																					Bạn có chắc muốn <strong>tạm dừng</strong>{" "}
-																					quy tắc <strong>"{rule.name}"</strong>?
+																					Bạn có chắc muốn{" "}
+																					<strong>tạm dừng</strong> quy tắc{" "}
+																					<strong>"{rule.name}"</strong>?
 																				</AlertDialogDescription>
 																			</AlertDialogHeader>
 																			<AlertDialogFooter>
-																				<AlertDialogCancel>Huỷ</AlertDialogCancel>
+																				<AlertDialogCancel>
+																					Huỷ
+																				</AlertDialogCancel>
 																				<AlertDialogAction
 																					className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 																					onClick={() =>
@@ -1165,8 +1222,8 @@ function DiscountsPage() {
 																				Xác nhận xóa chiết khấu
 																			</AlertDialogTitle>
 																			<AlertDialogDescription>
-																				Bạn có chắc muốn <strong>xóa</strong> quy tắc{" "}
-																				<strong>"{rule.name}"</strong>?
+																				Bạn có chắc muốn <strong>xóa</strong>{" "}
+																				quy tắc <strong>"{rule.name}"</strong>?
 																			</AlertDialogDescription>
 																		</AlertDialogHeader>
 																		<AlertDialogFooter>
@@ -1204,7 +1261,8 @@ function DiscountsPage() {
 																			Khách hàng
 																		</div>
 																		<div className="font-medium text-sm">
-																			{rule.customer?.name ?? "Tất cả khách hàng"}
+																			{rule.customer?.name ??
+																				"Tất cả khách hàng"}
 																		</div>
 																	</div>
 																	<div>
@@ -1258,21 +1316,25 @@ function DiscountsPage() {
 																						</div>
 																					</div>
 																					<div className="mt-3 space-y-2">
-																						{entry.changes.map((change, changeIndex) => (
-																							<div
-																								key={`${entry.editedAt}-${change.field}-${changeIndex}`}
-																								className="rounded-sm bg-muted/50 px-3 py-2 text-sm"
-																							>
-																								<div className="font-medium">
-																									{historyFieldLabels[change.field] ??
-																										change.field}
+																						{entry.changes.map(
+																							(change, changeIndex) => (
+																								<div
+																									key={`${entry.editedAt}-${change.field}-${changeIndex}`}
+																									className="rounded-sm bg-muted/50 px-3 py-2 text-sm"
+																								>
+																									<div className="font-medium">
+																										{historyFieldLabels[
+																											change.field
+																										] ?? change.field}
+																									</div>
+																									<div className="text-muted-foreground text-xs">
+																										{historyValue(change.from)}{" "}
+																										{" -> "}{" "}
+																										{historyValue(change.to)}
+																									</div>
 																								</div>
-																								<div className="text-muted-foreground text-xs">
-																									{historyValue(change.from)} {" -> "}{" "}
-																									{historyValue(change.to)}
-																								</div>
-																							</div>
-																						))}
+																							),
+																						)}
 																					</div>
 																				</div>
 																			))}
