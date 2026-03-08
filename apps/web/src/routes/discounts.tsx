@@ -237,12 +237,16 @@ function DiscountsPage() {
 	const [salesmanDialogOpen, setSalesmanDialogOpen] = useState(false);
 	const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
 	const [editDialogOpen, setEditDialogOpen] = useState(false);
+	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 	const [editingRuleId, setEditingRuleId] =
 		useState<Id<"discountRules"> | null>(null);
 	const [editingRuleName, setEditingRuleName] = useState("");
 	const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([]);
 	const [search, setSearch] = useState("");
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
+	const [pendingRemovedRuleIds, setPendingRemovedRuleIds] = useState<string[]>(
+		[],
+	);
 	const importInputRef = useRef<HTMLInputElement | null>(null);
 	const [salesmanForm, setSalesmanForm] = useState({
 		name: "",
@@ -520,8 +524,17 @@ function DiscountsPage() {
 		}
 	};
 
+	useEffect(() => {
+		if (!rules) return;
+		const activeRuleIdSet = new Set(rules.map((rule) => String(rule._id)));
+		setPendingRemovedRuleIds((prev) =>
+			prev.filter((id) => activeRuleIdSet.has(id)),
+		);
+	}, [rules]);
+
 	const filteredRules = rules?.filter((rule) => {
 		const keyword = search.trim().toLowerCase();
+		if (pendingRemovedRuleIds.includes(String(rule._id))) return false;
 		if (!keyword) return true;
 		return (rule.product?.name ?? "").toLowerCase().includes(keyword);
 	});
@@ -566,13 +579,25 @@ function DiscountsPage() {
 
 	const handleRemoveSelectedDiscounts = async () => {
 		if (selectedRuleIds.length === 0) return;
+		const removingIds = [...selectedRuleIds];
 		try {
-			await removeManyDiscounts({
-				ids: selectedRuleIds as Id<"discountRules">[],
-			});
+			setBulkDeleteDialogOpen(false);
+			setPendingRemovedRuleIds((prev) => [
+				...new Set([...prev, ...removingIds]),
+			]);
+			setExpandedRuleIds((prev) =>
+				prev.filter((id) => !removingIds.includes(id)),
+			);
 			setSelectedRuleIds([]);
-			toast.success(`Đã xóa ${selectedRuleIds.length} quy tắc chiết khấu`);
+			await removeManyDiscounts({
+				ids: removingIds as Id<"discountRules">[],
+			});
+			toast.success(`Đã xóa ${removingIds.length} quy tắc chiết khấu`);
 		} catch (error) {
+			setPendingRemovedRuleIds((prev) =>
+				prev.filter((id) => !removingIds.includes(id)),
+			);
+			setSelectedRuleIds(removingIds);
 			toast.error(
 				error instanceof Error
 					? error.message
@@ -1443,7 +1468,10 @@ function DiscountsPage() {
 								<FileSpreadsheet className="mr-2 h-4 w-4" />
 								Tải mẫu XLSX
 							</Button>
-							<AlertDialog>
+							<AlertDialog
+								open={bulkDeleteDialogOpen}
+								onOpenChange={setBulkDeleteDialogOpen}
+							>
 								<AlertDialogTrigger
 									render={
 										<Button
