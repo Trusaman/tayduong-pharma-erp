@@ -277,6 +277,28 @@ function DiscountsPage() {
 		? (rules?.find((rule) => rule._id === editingRuleId) ?? null)
 		: null;
 
+	const getCustomerDisplayName = (customerId: string) => {
+		if (!customerId) return undefined;
+
+		return (
+			customers?.find((customer) => customer._id === customerId)?.name ??
+			(editingRule?.customer?._id === customerId
+				? editingRule.customer.name
+				: undefined)
+		);
+	};
+
+	const getProductDisplayName = (productId: string) => {
+		if (!productId) return undefined;
+
+		return (
+			products?.find((product) => product._id === productId)?.name ??
+			(editingRule?.product?._id === productId
+				? editingRule.product.name
+				: undefined)
+		);
+	};
+
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
 	const formatDateTime = (timestamp: number) =>
@@ -1110,7 +1132,11 @@ function DiscountsPage() {
 												onValueChange={updateDiscountFormCustomer}
 											>
 												<SelectTrigger>
-													<SelectValue placeholder="Tất cả khách hàng" />
+													<SelectValue placeholder="Tất cả khách hàng">
+														{discountForm.customerId
+															? getCustomerDisplayName(discountForm.customerId)
+															: "Tất cả khách hàng"}
+													</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="all-customers">
@@ -1131,7 +1157,11 @@ function DiscountsPage() {
 												onValueChange={updateDiscountFormProduct}
 											>
 												<SelectTrigger>
-													<SelectValue placeholder="Tất cả sản phẩm" />
+													<SelectValue placeholder="Tất cả sản phẩm">
+														{discountForm.productId
+															? getProductDisplayName(discountForm.productId)
+															: "Tất cả sản phẩm"}
+													</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="all-products">
@@ -1335,7 +1365,11 @@ function DiscountsPage() {
 										onValueChange={updateEditFormCustomer}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Tất cả khách hàng" />
+											<SelectValue placeholder="Tất cả khách hàng">
+												{editForm.customerId
+													? getCustomerDisplayName(editForm.customerId)
+													: "Tất cả khách hàng"}
+											</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="all-customers">
@@ -1356,7 +1390,11 @@ function DiscountsPage() {
 										onValueChange={updateEditFormProduct}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Tất cả sản phẩm" />
+											<SelectValue placeholder="Tất cả sản phẩm">
+												{editForm.productId
+													? getProductDisplayName(editForm.productId)
+													: "Tất cả sản phẩm"}
+											</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="all-products">
