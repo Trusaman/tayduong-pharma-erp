@@ -10,6 +10,11 @@ const discountTypeValidator = v.union(
 	v.literal("Manager"),
 );
 
+const discountDetailValidator = v.object({
+	salesmanId: v.id("salesmen"),
+	discountPercent: v.number(),
+});
+
 const discountTypeLabels = {
 	Doctor: "Chiet khau BS",
 	hospital: "Chiet khau NT, KD",
@@ -397,16 +402,17 @@ export const update = mutation({
 	args: {
 		id: v.id("discountRules"),
 		name: v.optional(v.string()),
-		discountType: v.optional(discountTypeValidator),
 		customerId: v.optional(v.id("customers")),
 		productId: v.optional(v.id("products")),
-		salesmanId: v.optional(v.id("salesmen")),
-		discountPercent: v.optional(v.number()),
 		unitPrice: v.optional(v.union(v.number(), v.null())),
 		createdByStaff: v.optional(v.string()),
 		updatedByStaff: v.optional(v.string()),
 		notes: v.optional(v.union(v.string(), v.null())),
 		isActive: v.optional(v.boolean()),
+		doctorDiscount: v.optional(v.union(discountDetailValidator, v.null())),
+		salesDiscount: v.optional(v.union(discountDetailValidator, v.null())),
+		paymentDiscount: v.optional(v.union(discountDetailValidator, v.null())),
+		managerDiscount: v.optional(v.union(discountDetailValidator, v.null())),
 	},
 	handler: async (ctx, args) => {
 		const { id, updatedByStaff } = args;
@@ -430,38 +436,50 @@ export const update = mutation({
 			args.notes === undefined ? existing.notes : args.notes?.trim() ? args.notes.trim() : undefined;
 		const nextIsActive = typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
 
-		const existingConfigured = getConfiguredDiscounts(existing);
-		const targetDiscountType =
-			args.discountType ?? existing.discountType ?? existingConfigured[0]?.discountType;
-		const targetField = targetDiscountType ? discountTypeToField[targetDiscountType] : undefined;
-		const existingDetail = targetField
-			? existingConfigured.find((detail) => detail.field === targetField)
-			: undefined;
-
-		if ((args.salesmanId !== undefined || args.discountPercent !== undefined) && !targetField) {
-			throw new Error("Discount type is required to update the discount detail");
-		}
-
-		let nextDetail = existingDetail
-			? {
-					salesmanId: existingDetail.salesmanId,
-					discountPercent: existingDetail.discountPercent,
-				}
-			: undefined;
-
-		if (targetField && (args.salesmanId !== undefined || args.discountPercent !== undefined)) {
-			if (!nextDetail && args.salesmanId === undefined) {
-				throw new Error("Salesman is required when creating a new discount detail");
-			}
-
-			nextDetail = {
-				salesmanId: args.salesmanId ?? nextDetail!.salesmanId,
-				discountPercent:
-					typeof args.discountPercent === "number"
-						? clampPercent(args.discountPercent)
-						: nextDetail?.discountPercent ?? 0,
-			};
-		}
+		const existingDetails = {
+			doctorDiscount: existing.doctorDiscount,
+			salesDiscount: existing.salesDiscount,
+			paymentDiscount: existing.paymentDiscount,
+			managerDiscount: existing.managerDiscount,
+		};
+		const nextDetails = {
+			doctorDiscount:
+				args.doctorDiscount === undefined
+					? existing.doctorDiscount
+					: args.doctorDiscount === null
+						? undefined
+						: {
+							salesmanId: args.doctorDiscount.salesmanId,
+							discountPercent: clampPercent(args.doctorDiscount.discountPercent),
+						},
+			salesDiscount:
+				args.salesDiscount === undefined
+					? existing.salesDiscount
+					: args.salesDiscount === null
+						? undefined
+						: {
+							salesmanId: args.salesDiscount.salesmanId,
+							discountPercent: clampPercent(args.salesDiscount.discountPercent),
+						},
+			paymentDiscount:
+				args.paymentDiscount === undefined
+					? existing.paymentDiscount
+					: args.paymentDiscount === null
+						? undefined
+						: {
+							salesmanId: args.paymentDiscount.salesmanId,
+							discountPercent: clampPercent(args.paymentDiscount.discountPercent),
+						},
+			managerDiscount:
+				args.managerDiscount === undefined
+					? existing.managerDiscount
+					: args.managerDiscount === null
+						? undefined
+						: {
+							salesmanId: args.managerDiscount.salesmanId,
+							discountPercent: clampPercent(args.managerDiscount.discountPercent),
+						},
+		};
 
 		const changes: Array<{ field: string; from?: string; to?: string }> = [];
 		const pushChange = async (field: string, previous: unknown, next: unknown) => {
@@ -480,9 +498,10 @@ export const update = mutation({
 		await pushChange("createdByStaff", existing.createdByStaff, nextCreatedByStaff);
 		await pushChange("notes", existing.notes, nextNotes);
 		await pushChange("isActive", existing.isActive, nextIsActive);
-		if (targetField && nextDetail) {
-			await pushChange(targetField, existingDetail, nextDetail);
-		}
+		await pushChange("doctorDiscount", existingDetails.doctorDiscount, nextDetails.doctorDiscount);
+		await pushChange("salesDiscount", existingDetails.salesDiscount, nextDetails.salesDiscount);
+		await pushChange("paymentDiscount", existingDetails.paymentDiscount, nextDetails.paymentDiscount);
+		await pushChange("managerDiscount", existingDetails.managerDiscount, nextDetails.managerDiscount);
 
 		const patch: Partial<typeof existing> & Record<string, unknown> = {
 			name: nextName,
@@ -492,11 +511,12 @@ export const update = mutation({
 			createdByStaff: nextCreatedByStaff,
 			notes: nextNotes,
 			isActive: nextIsActive,
+			doctorDiscount: nextDetails.doctorDiscount,
+			salesDiscount: nextDetails.salesDiscount,
+			paymentDiscount: nextDetails.paymentDiscount,
+			managerDiscount: nextDetails.managerDiscount,
 			updatedAt: now,
 		};
-		if (targetField && nextDetail) {
-			patch[targetField] = nextDetail;
-		}
 
 		const editorName = updatedByStaff?.trim();
 		if (editorName && changes.length > 0) {
