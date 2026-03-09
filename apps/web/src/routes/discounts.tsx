@@ -299,6 +299,17 @@ function DiscountsPage() {
 		);
 	};
 
+	const getSalesmanDisplayName = (salesmanId: string) => {
+		if (!salesmanId) return undefined;
+
+		return (
+			salesmen?.find((salesman) => salesman._id === salesmanId)?.name ??
+			(editingRule?.salesman?._id === salesmanId
+				? editingRule.salesman.name
+				: undefined)
+		);
+	};
+
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
 	const formatDateTime = (timestamp: number) =>
@@ -1230,7 +1241,13 @@ function DiscountsPage() {
 														}
 													>
 														<SelectTrigger>
-															<SelectValue placeholder="Chọn người nhận" />
+															<SelectValue placeholder="Chọn người nhận">
+																{discountForm[group.key].salesmanId
+																	? getSalesmanDisplayName(
+																			discountForm[group.key].salesmanId,
+																		)
+																	: undefined}
+															</SelectValue>
 														</SelectTrigger>
 														<SelectContent>
 															{salesmen?.map((salesman) => (
@@ -1417,7 +1434,9 @@ function DiscountsPage() {
 										onValueChange={updateEditFormSalesman}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Chọn người nhận" />
+											<SelectValue placeholder="Chọn người nhận">
+												{getSalesmanDisplayName(editForm.salesmanId)}
+											</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
 											{salesmen?.map((salesman) => (
