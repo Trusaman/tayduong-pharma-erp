@@ -238,8 +238,7 @@ function DiscountsPage() {
 	const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
 	const [editDialogOpen, setEditDialogOpen] = useState(false);
 	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
-	const [editingRuleId, setEditingRuleId] =
-		useState<Id<"discountRules"> | null>(null);
+	const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 	const [editingRuleName, setEditingRuleName] = useState("");
 	const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([]);
 	const [search, setSearch] = useState("");
@@ -290,8 +289,11 @@ function DiscountsPage() {
 	const removeManyDiscounts = useMutation(api.discounts.removeMany);
 	const importDiscounts = useMutation(api.discounts.importMany);
 
+	const getEditingRuleKey = (rule: DiscountRuleRow) =>
+		`${String(rule._id)}:${rule.discountType}`;
+
 	const editingRule = editingRuleId
-		? (rules?.find((rule) => rule._id === editingRuleId) ?? null)
+		? (rules?.find((rule) => getEditingRuleKey(rule) === editingRuleId) ?? null)
 		: null;
 
 	const getCustomerDisplayName = (customerId: string) => {
@@ -548,7 +550,8 @@ function DiscountsPage() {
 			}
 
 			await updateDiscount({
-				id: editingRuleId,
+				id: editingRule._id,
+				discountType: editingRule.discountType,
 				name: editForm.name.trim(),
 				customerId: editForm.customerId
 					? (editForm.customerId as Id<"customers">)
@@ -1094,7 +1097,7 @@ function DiscountsPage() {
 	};
 
 	const startEditingRule = (rule: DiscountRuleRow) => {
-		setEditingRuleId(rule._id);
+		setEditingRuleId(getEditingRuleKey(rule));
 		setEditingRuleName(rule.name);
 		setEditForm({
 			name: rule.name,

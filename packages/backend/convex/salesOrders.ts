@@ -18,6 +18,40 @@ async function generateOrderNumber(ctx: any): Promise<string> {
 	return `SO${year}${month}-${sequence}`;
 }
 
+function getDiscountEntries(rule: {
+	doctorDiscount?: { discountPercent: number };
+	salesDiscount?: { discountPercent: number };
+	paymentDiscount?: { discountPercent: number };
+	managerDiscount?: { discountPercent: number };
+	discountPercent?: number;
+}) {
+	const values = [
+		rule.doctorDiscount?.discountPercent,
+		rule.salesDiscount?.discountPercent,
+		rule.paymentDiscount?.discountPercent,
+		rule.managerDiscount?.discountPercent,
+	].filter((value): value is number => typeof value === "number");
+
+	if (values.length > 0) return values;
+	return typeof rule.discountPercent === "number" ? [rule.discountPercent] : [];
+}
+
+function getAppliedDiscountTypes(rule: {
+	doctorDiscount?: { discountPercent: number };
+	salesDiscount?: { discountPercent: number };
+	paymentDiscount?: { discountPercent: number };
+	managerDiscount?: { discountPercent: number };
+	discountType?: string;
+}) {
+	const types: string[] = [];
+	if (rule.doctorDiscount) types.push("Doctor");
+	if (rule.salesDiscount) types.push("hospital");
+	if (rule.paymentDiscount) types.push("payment");
+	if (rule.managerDiscount) types.push("Manager");
+	if (types.length > 0) return types;
+	return rule.discountType ? [rule.discountType] : [];
+}
+
 export const list = query({
 	args: {
 		status: v.optional(
@@ -146,23 +180,10 @@ export const create = mutation({
 		const now = Date.now();
 		const orderNumber = await generateOrderNumber(ctx);
 
-		let discountRules: Array<{
-			_id: unknown;
-			name: string;
-			discountType: string;
-			customerId?: unknown;
-			productId?: unknown;
-			discountPercent: number;
-			isActive: boolean;
-		}> = [];
-
-		if (args.salesmanId) {
-			discountRules = await ctx.db
-				.query("discountRules")
-				.withIndex("by_salesman", (q) => q.eq("salesmanId", args.salesmanId!))
-				.filter((q) => q.eq(q.field("isActive"), true))
-				.collect();
-		}
+		const discountRules = await ctx.db
+			.query("discountRules")
+			.withIndex("by_active", (q) => q.eq("isActive", true))
+			.collect();
 
 		const preparedItems = args.items.map((item) => {
 			const matched = discountRules.filter((rule) => {
@@ -175,7 +196,11 @@ export const create = mutation({
 
 			const autoDiscountPercent = Math.min(
 				100,
-				matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
+				matched.reduce(
+					(sum, rule) =>
+						sum + getDiscountEntries(rule).reduce((total, percent) => total + percent, 0),
+					0,
+				),
 			);
 			const discountPercent =
 				item.manualDiscountPercent !== undefined
@@ -193,7 +218,7 @@ export const create = mutation({
 				unitPrice: discountedUnitPrice,
 				discountPercent,
 				discountAmount,
-				appliedDiscountTypes: matched.map((rule) => rule.discountType),
+				appliedDiscountTypes: matched.flatMap((rule) => getAppliedDiscountTypes(rule)),
 			};
 		});
 

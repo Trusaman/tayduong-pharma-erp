@@ -86,20 +86,47 @@ export default defineSchema({
 	discountRules: defineTable({
 		name: v.string(),
 		ruleGroupId: v.optional(v.string()),
-		discountType: v.union(
-			v.literal("Doctor"),
-			v.literal("hospital"),
-			v.literal("payment"),
-			v.literal("Salesman"),
-			v.literal("Manager"),
-		),
 		customerId: v.optional(v.id("customers")),
 		productId: v.optional(v.id("products")),
-		salesmanId: v.id("salesmen"),
-		discountPercent: v.number(),
 		unitPrice: v.optional(v.number()),
 		createdByStaff: v.string(),
 		notes: v.optional(v.string()),
+		doctorDiscount: v.optional(
+			v.object({
+				salesmanId: v.id("salesmen"),
+				discountPercent: v.number(),
+			}),
+		),
+		salesDiscount: v.optional(
+			v.object({
+				salesmanId: v.id("salesmen"),
+				discountPercent: v.number(),
+			}),
+		),
+		paymentDiscount: v.optional(
+			v.object({
+				salesmanId: v.id("salesmen"),
+				discountPercent: v.number(),
+			}),
+		),
+		managerDiscount: v.optional(
+			v.object({
+				salesmanId: v.id("salesmen"),
+				discountPercent: v.number(),
+			}),
+		),
+		// Legacy flat fields kept optional so existing documents remain readable.
+		discountType: v.optional(
+			v.union(
+				v.literal("Doctor"),
+				v.literal("hospital"),
+				v.literal("payment"),
+				v.literal("Salesman"),
+				v.literal("Manager"),
+			),
+		),
+		salesmanId: v.optional(v.id("salesmen")),
+		discountPercent: v.optional(v.number()),
 		editHistory: v.optional(
 			v.array(
 				v.object({
@@ -119,6 +146,7 @@ export default defineSchema({
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	})
+		.index("by_rule_group", ["ruleGroupId"])
 		.index("by_salesman", ["salesmanId"])
 		.index("by_customer", ["customerId"])
 		.index("by_product", ["productId"])

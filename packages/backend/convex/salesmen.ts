@@ -91,12 +91,18 @@ export const remove = mutation({
 			throw new Error("Cannot delete salesman that has sales orders");
 		}
 
-		const discount = await ctx.db
-			.query("discountRules")
-			.withIndex("by_salesman", (q) => q.eq("salesmanId", args.id))
-			.first();
+		const discounts = await ctx.db.query("discountRules").collect();
+		const hasDiscount = discounts.some((discount) => {
+			return [
+				discount.doctorDiscount?.salesmanId,
+				discount.salesDiscount?.salesmanId,
+				discount.paymentDiscount?.salesmanId,
+				discount.managerDiscount?.salesmanId,
+				discount.salesmanId,
+			].includes(args.id);
+		});
 
-		if (discount) {
+		if (hasDiscount) {
 			throw new Error("Cannot delete salesman that has discount rules");
 		}
 

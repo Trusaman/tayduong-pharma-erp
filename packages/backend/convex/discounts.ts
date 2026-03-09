@@ -11,11 +11,33 @@ const discountTypeValidator = v.union(
 );
 
 const discountTypeLabels = {
-	Doctor: "Chiết khấu BS",
-	hospital: "Chiết khấu NT, KD",
-	payment: "Chiết khấu thanh toán",
-	Salesman: "Chiết khấu NT, KD",
-	Manager: "Chiết khấu Quản lý",
+	Doctor: "Chiet khau BS",
+	hospital: "Chiet khau NT, KD",
+	payment: "Chiet khau thanh toan",
+	Salesman: "Chiet khau NT, KD",
+	Manager: "Chiet khau Quan ly",
+} as const;
+
+const discountTypeToField = {
+	Doctor: "doctorDiscount",
+	hospital: "salesDiscount",
+	payment: "paymentDiscount",
+	Salesman: "salesDiscount",
+	Manager: "managerDiscount",
+} as const;
+
+const fieldToDiscountType = {
+	doctorDiscount: "Doctor",
+	salesDiscount: "hospital",
+	paymentDiscount: "payment",
+	managerDiscount: "Manager",
+} as const;
+
+const fieldLabels = {
+	doctorDiscount: "Chiet khau BS",
+	salesDiscount: "Chiet khau NT, KD",
+	paymentDiscount: "Chiet khau thanh toan",
+	managerDiscount: "Chiet khau Quan ly",
 } as const;
 
 const importDiscountTypeCodeMap = {
@@ -27,6 +49,13 @@ const importDiscountTypeCodeMap = {
 } as const;
 
 type DiscountTypeValue = keyof typeof discountTypeLabels;
+type DiscountFieldName = keyof typeof fieldToDiscountType;
+type DiscountDetail = {
+	field: DiscountFieldName;
+	discountType: DiscountTypeValue;
+	salesmanId: Id<"salesmen">;
+	discountPercent: number;
+};
 
 function normalizeLookupCode(value: string) {
 	return value.trim().toUpperCase();
@@ -35,12 +64,12 @@ function normalizeLookupCode(value: string) {
 function parseImportNumber(value: string, fieldName: string) {
 	const trimmed = value.trim();
 	if (!trimmed) {
-		throw new Error(`${fieldName} không được để trống`);
+		throw new Error(`${fieldName} khong duoc de trong`);
 	}
 
 	const cleaned = trimmed.replace(/\s+/g, "");
 	if (!/^[\d.,]+$/.test(cleaned)) {
-		throw new Error(`${fieldName} không hợp lệ`);
+		throw new Error(`${fieldName} khong hop le`);
 	}
 
 	const commaCount = cleaned.split(",").length - 1;
@@ -70,7 +99,7 @@ function parseImportNumber(value: string, fieldName: string) {
 
 	const parsed = Number(normalized);
 	if (!Number.isFinite(parsed)) {
-		throw new Error(`${fieldName} không hợp lệ`);
+		throw new Error(`${fieldName} khong hop le`);
 	}
 
 	return parsed;
@@ -94,7 +123,7 @@ function parseImportStatus(value: string) {
 		return false;
 	}
 
-	throw new Error(`Trạng thái không hợp lệ: ${value}`);
+	throw new Error(`Trang thai khong hop le: ${value}`);
 }
 
 function clampPercent(percent: number) {
@@ -112,7 +141,85 @@ function formatCurrencyValue(amount: number) {
 	return `${new Intl.NumberFormat("vi-VN", {
 		minimumFractionDigits: 0,
 		maximumFractionDigits: 2,
-	}).format(amount)} đ`;
+	}).format(amount)} d`;
+}
+
+function getConfiguredDiscounts(rule: {
+	doctorDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
+	salesDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
+	paymentDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
+	managerDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
+	discountType?: DiscountTypeValue;
+	salesmanId?: Id<"salesmen">;
+	discountPercent?: number;
+}) {
+	const details: DiscountDetail[] = [];
+	for (const field of Object.keys(fieldToDiscountType) as DiscountFieldName[]) {
+		const detail = rule[field];
+		if (detail?.salesmanId) {
+			details.push({
+				field,
+				discountType: fieldToDiscountType[field],
+				salesmanId: detail.salesmanId,
+				discountPercent: clampPercent(detail.discountPercent),
+			});
+		}
+	}
+
+	if (details.length > 0) {
+		return details;
+	}
+
+	if (
+		rule.discountType &&
+		rule.salesmanId &&
+		typeof rule.discountPercent === "number"
+	) {
+		return [
+			{
+				field: discountTypeToField[rule.discountType],
+				discountType: rule.discountType,
+				salesmanId: rule.salesmanId,
+				discountPercent: clampPercent(rule.discountPercent),
+			},
+		];
+	}
+
+	return [];
+}
+
+function hasMatchingSalesman(
+	rule: Parameters<typeof getConfiguredDiscounts>[0],
+	salesmanId: Id<"salesmen">,
+) {
+	return getConfiguredDiscounts(rule).some((detail) => detail.salesmanId === salesmanId);
+}
+
+function getTotalDiscountPercent(rule: Parameters<typeof getConfiguredDiscounts>[0]) {
+	return clampPercent(
+		getConfiguredDiscounts(rule).reduce(
+			(total, detail) => total + detail.discountPercent,
+			0,
+		),
+	);
+}
+
+async function formatDiscountDetailValue(
+	ctx: MutationCtx,
+	field: DiscountFieldName,
+	value: unknown,
+) {
+	if (!value || typeof value !== "object") {
+		return undefined;
+	}
+
+	const detail = value as { salesmanId?: Id<"salesmen">; discountPercent?: number };
+	if (!detail.salesmanId || typeof detail.discountPercent !== "number") {
+		return undefined;
+	}
+
+	const salesman = await ctx.db.get(detail.salesmanId);
+	return `${fieldLabels[field]}: ${clampPercent(detail.discountPercent)}% / ${salesman?.name ?? detail.salesmanId}`;
 }
 
 async function formatHistoryValue(
@@ -122,6 +229,10 @@ async function formatHistoryValue(
 ) {
 	if (value === undefined || value === null || value === "") {
 		return undefined;
+	}
+
+	if ((Object.keys(fieldLabels) as string[]).includes(field)) {
+		return await formatDiscountDetailValue(ctx, field as DiscountFieldName, value);
 	}
 
 	switch (field) {
@@ -147,7 +258,7 @@ async function formatHistoryValue(
 		case "unitPrice":
 			return formatCurrencyValue(clampAmount(Number(value)));
 		case "isActive":
-			return value ? "Hoạt động" : "Tạm dừng";
+			return value ? "Hoat dong" : "Tam dung";
 		default:
 			return String(value);
 	}
@@ -170,10 +281,12 @@ export const list = query({
 			: await ctx.db.query("discountRules").order("desc").collect();
 
 		return base.filter((rule) => {
-			if (args.salesmanId && rule.salesmanId !== args.salesmanId) return false;
 			if (args.customerId && rule.customerId !== args.customerId) return false;
 			if (args.productId && rule.productId !== args.productId) return false;
-			return true;
+			if (args.salesmanId && !hasMatchingSalesman(rule, args.salesmanId)) {
+				return false;
+			}
+			return getConfiguredDiscounts(rule).length > 0;
 		});
 	},
 });
@@ -189,24 +302,29 @@ export const listWithDetails = query({
 					.collect()
 			: await ctx.db.query("discountRules").order("desc").collect();
 
-		return await Promise.all(
+		const result = await Promise.all(
 			rules.map(async (rule) => {
-				const customer = rule.customerId
-					? await ctx.db.get(rule.customerId)
-					: null;
-				const product = rule.productId
-					? await ctx.db.get(rule.productId)
-					: null;
-				const salesman = await ctx.db.get(rule.salesmanId);
-				return {
-					...rule,
-					customer,
-					product,
-					salesman,
-					editHistory: rule.editHistory ?? [],
-				};
+				const customer = rule.customerId ? await ctx.db.get(rule.customerId) : null;
+				const product = rule.productId ? await ctx.db.get(rule.productId) : null;
+				const configuredDiscounts = getConfiguredDiscounts(rule);
+
+				return await Promise.all(
+					configuredDiscounts.map(async (detail) => ({
+						...rule,
+						customer,
+						product,
+						salesman: await ctx.db.get(detail.salesmanId),
+						salesmanId: detail.salesmanId,
+						discountType: detail.discountType,
+						discountPercent: detail.discountPercent,
+						totalDiscountPercent: getTotalDiscountPercent(rule),
+						editHistory: rule.editHistory ?? [],
+					})),
+				);
 			}),
 		);
+
+		return result.flat();
 	},
 });
 
@@ -225,24 +343,53 @@ export const create = mutation({
 	},
 	handler: async (ctx, args) => {
 		const now = Date.now();
-		return await ctx.db.insert("discountRules", {
-			name: args.name,
-			ruleGroupId: args.ruleGroupId?.trim() || undefined,
-			discountType: args.discountType,
-			customerId: args.customerId,
-			productId: args.productId,
+		const field = discountTypeToField[args.discountType];
+		const detail = {
 			salesmanId: args.salesmanId,
 			discountPercent: clampPercent(args.discountPercent),
-			unitPrice:
-				typeof args.unitPrice === "number"
-					? clampAmount(args.unitPrice)
-					: undefined,
+		};
+		const ruleGroupId = args.ruleGroupId?.trim() || undefined;
+		const notes = args.notes?.trim() ? args.notes.trim() : undefined;
+		const unitPrice =
+			typeof args.unitPrice === "number" ? clampAmount(args.unitPrice) : undefined;
+
+		if (ruleGroupId) {
+			const existing = await ctx.db
+				.query("discountRules")
+				.withIndex("by_rule_group", (q) => q.eq("ruleGroupId", ruleGroupId))
+				.first();
+
+			if (existing) {
+				const patch: Partial<typeof existing> & Record<string, unknown> = {
+					name: args.name,
+					customerId: args.customerId,
+					productId: args.productId,
+					unitPrice,
+					createdByStaff: args.createdByStaff,
+					notes,
+					updatedAt: now,
+				};
+				patch[field] = detail;
+				await ctx.db.patch(existing._id, patch);
+				return existing._id;
+			}
+		}
+
+		const insertDoc: Record<string, unknown> = {
+			name: args.name,
+			ruleGroupId,
+			customerId: args.customerId,
+			productId: args.productId,
+			unitPrice,
 			createdByStaff: args.createdByStaff,
-			notes: args.notes,
+			notes,
 			isActive: true,
 			createdAt: now,
 			updatedAt: now,
-		});
+		};
+		insertDoc[field] = detail;
+
+		return await ctx.db.insert("discountRules", insertDoc as any);
 	},
 });
 
@@ -268,20 +415,10 @@ export const update = mutation({
 
 		const now = Date.now();
 		const nextName = args.name ?? existing.name;
-		const nextDiscountType = args.discountType ?? existing.discountType;
 		const nextCustomerId =
-			args.customerId === undefined
-				? existing.customerId
-				: (args.customerId ?? undefined);
+			args.customerId === undefined ? existing.customerId : (args.customerId ?? undefined);
 		const nextProductId =
-			args.productId === undefined
-				? existing.productId
-				: (args.productId ?? undefined);
-		const nextSalesmanId = args.salesmanId ?? existing.salesmanId;
-		const nextDiscountPercent =
-			typeof args.discountPercent === "number"
-				? clampPercent(args.discountPercent)
-				: existing.discountPercent;
+			args.productId === undefined ? existing.productId : (args.productId ?? undefined);
 		const nextUnitPrice =
 			args.unitPrice === undefined
 				? existing.unitPrice
@@ -290,27 +427,45 @@ export const update = mutation({
 					: clampAmount(args.unitPrice);
 		const nextCreatedByStaff = args.createdByStaff ?? existing.createdByStaff;
 		const nextNotes =
-			args.notes === undefined
-				? existing.notes
-				: args.notes?.trim()
-					? args.notes.trim()
-					: undefined;
-		const nextIsActive =
-			typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
+			args.notes === undefined ? existing.notes : args.notes?.trim() ? args.notes.trim() : undefined;
+		const nextIsActive = typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
 
-		const changes: Array<{
-			field: string;
-			from?: string;
-			to?: string;
-		}> = [];
+		const existingConfigured = getConfiguredDiscounts(existing);
+		const targetDiscountType =
+			args.discountType ?? existing.discountType ?? existingConfigured[0]?.discountType;
+		const targetField = targetDiscountType ? discountTypeToField[targetDiscountType] : undefined;
+		const existingDetail = targetField
+			? existingConfigured.find((detail) => detail.field === targetField)
+			: undefined;
 
-		const pushChange = async (
-			field: string,
-			previous: unknown,
-			next: unknown,
-		) => {
-			if (previous === next) return;
+		if ((args.salesmanId !== undefined || args.discountPercent !== undefined) && !targetField) {
+			throw new Error("Discount type is required to update the discount detail");
+		}
 
+		let nextDetail = existingDetail
+			? {
+					salesmanId: existingDetail.salesmanId,
+					discountPercent: existingDetail.discountPercent,
+				}
+			: undefined;
+
+		if (targetField && (args.salesmanId !== undefined || args.discountPercent !== undefined)) {
+			if (!nextDetail && args.salesmanId === undefined) {
+				throw new Error("Salesman is required when creating a new discount detail");
+			}
+
+			nextDetail = {
+				salesmanId: args.salesmanId ?? nextDetail!.salesmanId,
+				discountPercent:
+					typeof args.discountPercent === "number"
+						? clampPercent(args.discountPercent)
+						: nextDetail?.discountPercent ?? 0,
+			};
+		}
+
+		const changes: Array<{ field: string; from?: string; to?: string }> = [];
+		const pushChange = async (field: string, previous: unknown, next: unknown) => {
+			if (JSON.stringify(previous) === JSON.stringify(next)) return;
 			changes.push({
 				field,
 				from: await formatHistoryValue(ctx, field, previous),
@@ -319,52 +474,43 @@ export const update = mutation({
 		};
 
 		await pushChange("name", existing.name, nextName);
-		await pushChange("discountType", existing.discountType, nextDiscountType);
 		await pushChange("customerId", existing.customerId, nextCustomerId);
 		await pushChange("productId", existing.productId, nextProductId);
-		await pushChange("salesmanId", existing.salesmanId, nextSalesmanId);
-		await pushChange(
-			"discountPercent",
-			existing.discountPercent,
-			nextDiscountPercent,
-		);
 		await pushChange("unitPrice", existing.unitPrice, nextUnitPrice);
-		await pushChange(
-			"createdByStaff",
-			existing.createdByStaff,
-			nextCreatedByStaff,
-		);
+		await pushChange("createdByStaff", existing.createdByStaff, nextCreatedByStaff);
 		await pushChange("notes", existing.notes, nextNotes);
 		await pushChange("isActive", existing.isActive, nextIsActive);
+		if (targetField && nextDetail) {
+			await pushChange(targetField, existingDetail, nextDetail);
+		}
 
-		const editorName = updatedByStaff?.trim();
-
-		await ctx.db.patch(id, {
+		const patch: Partial<typeof existing> & Record<string, unknown> = {
 			name: nextName,
-			discountType: nextDiscountType,
 			customerId: nextCustomerId,
 			productId: nextProductId,
-			salesmanId: nextSalesmanId,
-			discountPercent: nextDiscountPercent,
 			unitPrice: nextUnitPrice,
 			createdByStaff: nextCreatedByStaff,
 			notes: nextNotes,
 			isActive: nextIsActive,
-			...(editorName && changes.length > 0
-				? {
-						editHistory: [
-							...(existing.editHistory ?? []),
-							{
-								editedAt: now,
-								editedBy: editorName,
-								changes,
-							},
-						],
-					}
-				: {}),
 			updatedAt: now,
-		});
+		};
+		if (targetField && nextDetail) {
+			patch[targetField] = nextDetail;
+		}
 
+		const editorName = updatedByStaff?.trim();
+		if (editorName && changes.length > 0) {
+			patch.editHistory = [
+				...(existing.editHistory ?? []),
+				{
+					editedAt: now,
+					editedBy: editorName,
+					changes,
+				},
+			];
+		}
+
+		await ctx.db.patch(id, patch);
 		return await ctx.db.get(id);
 	},
 });
@@ -384,7 +530,6 @@ export const removeMany = mutation({
 		for (const id of uniqueIds) {
 			await ctx.db.delete(id);
 		}
-
 		return { success: true, removedCount: uniqueIds.length };
 	},
 });
@@ -412,7 +557,7 @@ export const importMany = mutation({
 	},
 	handler: async (ctx, args) => {
 		if (args.rows.length === 0) {
-			throw new Error("File import không có dữ liệu");
+			throw new Error("File import khong co du lieu");
 		}
 
 		const [customers, products, salesmen] = await Promise.all([
@@ -421,165 +566,142 @@ export const importMany = mutation({
 			ctx.db.query("salesmen").collect(),
 		]);
 
-		const customerByCode = new Map(
-			customers.map((item) => [normalizeLookupCode(item.code), item]),
-		);
-		const productBySku = new Map(
-			products.map((item) => [normalizeLookupCode(item.sku), item]),
-		);
-		const salesmanByCode = new Map(
-			salesmen.map((item) => [normalizeLookupCode(item.code), item]),
-		);
+		const customerByCode = new Map(customers.map((item) => [normalizeLookupCode(item.code), item]));
+		const productBySku = new Map(products.map((item) => [normalizeLookupCode(item.sku), item]));
+		const salesmanByCode = new Map(salesmen.map((item) => [normalizeLookupCode(item.code), item]));
 
 		const errors: string[] = [];
-		const preparedRows: Array<{
+		const preparedRows = new Map<string, {
 			name: string;
-			discountType: DiscountTypeValue;
-			customerId?: (typeof customers)[number]["_id"];
-			productId?: (typeof products)[number]["_id"];
-			salesmanId: (typeof salesmen)[number]["_id"];
-			discountPercent: number;
+			customerId?: Id<"customers">;
+			productId?: Id<"products">;
 			unitPrice?: number;
 			createdByStaff: string;
 			notes?: string;
 			isActive: boolean;
-		}> = [];
+			details: Partial<Record<DiscountFieldName, { salesmanId: Id<"salesmen">; discountPercent: number }>>;
+		}>();
 
 		for (const [index, row] of args.rows.entries()) {
 			const rowNumber = index + 2;
 			try {
 				const ruleName = row.name.trim();
-				if (!ruleName) {
-					throw new Error("Tên quy tắc không được để trống");
-				}
+				if (!ruleName) throw new Error("Ten quy tac khong duoc de trong");
 
 				const discountTypeCode = normalizeLookupCode(row.discountTypeCode);
-				const mappedDiscountType =
-					importDiscountTypeCodeMap[
-						discountTypeCode as keyof typeof importDiscountTypeCodeMap
-					];
+				const mappedDiscountType = importDiscountTypeCodeMap[discountTypeCode as keyof typeof importDiscountTypeCodeMap];
 				if (!mappedDiscountType) {
-					throw new Error(
-						`Mã loại chiết khấu không hợp lệ: ${row.discountTypeCode}`,
-					);
+					throw new Error(`Ma loai chiet khau khong hop le: ${row.discountTypeCode}`);
 				}
+				const field = discountTypeToField[mappedDiscountType];
 
 				const customerCode = row.customerCode?.trim() ?? "";
 				if (!customerCode && row.customerName?.trim()) {
-					throw new Error(
-						"Khách hàng phải dùng mã khách hàng, không import theo tên",
-					);
+					throw new Error("Khach hang phai dung ma, khong import theo ten");
 				}
-
 				const productSku = row.productSku?.trim() ?? "";
 				if (!productSku && row.productName?.trim()) {
-					throw new Error("Sản phẩm phải dùng SKU, không import theo tên");
+					throw new Error("San pham phai dung SKU, khong import theo ten");
 				}
 
-				const customer = customerCode
-					? customerByCode.get(normalizeLookupCode(customerCode))
-					: undefined;
+				const customer = customerCode ? customerByCode.get(normalizeLookupCode(customerCode)) : undefined;
 				if (customerCode && !customer) {
-					throw new Error(`Không tìm thấy khách hàng theo mã: ${customerCode}`);
+					throw new Error(`Khong tim thay khach hang theo ma: ${customerCode}`);
 				}
-
-				const product = productSku
-					? productBySku.get(normalizeLookupCode(productSku))
-					: undefined;
+				const product = productSku ? productBySku.get(normalizeLookupCode(productSku)) : undefined;
 				if (productSku && !product) {
-					throw new Error(`Không tìm thấy sản phẩm theo SKU: ${productSku}`);
+					throw new Error(`Khong tim thay san pham theo SKU: ${productSku}`);
 				}
 
 				const salesmanCode = row.salesmanCode.trim();
-				if (!salesmanCode) {
-					throw new Error("Mã người nhận chiết khấu không được để trống");
-				}
+				if (!salesmanCode) throw new Error("Ma nguoi nhan khong duoc de trong");
 				const salesman = salesmanByCode.get(normalizeLookupCode(salesmanCode));
 				if (!salesman) {
-					throw new Error(`Không tìm thấy người nhận theo mã: ${salesmanCode}`);
+					throw new Error(`Khong tim thay nguoi nhan theo ma: ${salesmanCode}`);
 				}
 
-				const discountPercent = parseImportNumber(
-					row.discountPercent,
-					"Tổng chiết khấu %",
-				);
+				const discountPercent = parseImportNumber(row.discountPercent, "Ty le chiet khau");
 				if (discountPercent < 0 || discountPercent > 100) {
-					throw new Error(
-						"Tổng chiết khấu % phải nằm trong khoảng từ 0 đến 100",
-					);
+					throw new Error("Ty le chiet khau phai nam trong khoang 0-100");
 				}
 
 				const unitPriceRaw = row.unitPrice?.trim() ?? "";
-				const unitPrice = unitPriceRaw
-					? parseImportNumber(unitPriceRaw, "Đơn giá")
-					: undefined;
+				const unitPrice = unitPriceRaw ? parseImportNumber(unitPriceRaw, "Don gia") : undefined;
 				if (typeof unitPrice === "number" && unitPrice < 0) {
-					throw new Error("Đơn giá không được âm");
+					throw new Error("Don gia khong duoc am");
 				}
 
 				const createdByStaff = row.createdByStaff.trim();
-				if (!createdByStaff) {
-					throw new Error("Người tạo không được để trống");
-				}
+				if (!createdByStaff) throw new Error("Nguoi tao khong duoc de trong");
+				const notes = row.notes?.trim() ? row.notes.trim() : undefined;
+				const isActive = parseImportStatus(row.status ?? "active");
 
-				const status = parseImportStatus(row.status ?? "active");
+				const groupingKey = [
+					ruleName,
+					customer?._id ?? "all-customers",
+					product?._id ?? "all-products",
+					typeof unitPrice === "number" ? String(unitPrice) : "all-prices",
+					createdByStaff,
+					notes ?? "",
+					isActive ? "active" : "inactive",
+				].join("||");
 
-				preparedRows.push({
+				const existingGroup = preparedRows.get(groupingKey) ?? {
 					name: ruleName,
-					discountType: mappedDiscountType,
 					customerId: customer?._id,
 					productId: product?._id,
-					salesmanId: salesman._id,
-					discountPercent,
 					unitPrice,
 					createdByStaff,
-					notes: row.notes?.trim() ? row.notes.trim() : undefined,
-					isActive: status,
-				});
+					notes,
+					isActive,
+					details: {},
+				};
+
+				if (existingGroup.details[field]) {
+					throw new Error(`Trung loai chiet khau ${discountTypeLabels[mappedDiscountType]} trong cung mot quy tac`);
+				}
+
+				existingGroup.details[field] = {
+					salesmanId: salesman._id,
+					discountPercent,
+				};
+				preparedRows.set(groupingKey, existingGroup);
 			} catch (error) {
-				errors.push(
-					`Dòng ${rowNumber}: ${error instanceof Error ? error.message : "Lỗi dữ liệu"}`,
-				);
+				errors.push(`Dong ${rowNumber}: ${error instanceof Error ? error.message : "Loi du lieu"}`);
 			}
 		}
 
 		if (errors.length > 0) {
-			throw new Error(`Dữ liệu import không hợp lệ:\n${errors.join("\n")}`);
+			throw new Error(`Du lieu import khong hop le:\n${errors.join("\n")}`);
 		}
 
 		let inactiveCount = 0;
-		for (const prepared of preparedRows) {
+		for (const prepared of preparedRows.values()) {
 			const now = Date.now();
-			const ruleId = await ctx.db.insert("discountRules", {
+			await ctx.db.insert("discountRules", {
 				name: prepared.name,
-				discountType: prepared.discountType,
 				customerId: prepared.customerId,
 				productId: prepared.productId,
-				salesmanId: prepared.salesmanId,
-				discountPercent: clampPercent(prepared.discountPercent),
 				unitPrice:
 					typeof prepared.unitPrice === "number"
 						? clampAmount(prepared.unitPrice)
 						: undefined,
 				createdByStaff: prepared.createdByStaff,
 				notes: prepared.notes,
-				isActive: true,
+				doctorDiscount: prepared.details.doctorDiscount,
+				salesDiscount: prepared.details.salesDiscount,
+				paymentDiscount: prepared.details.paymentDiscount,
+				managerDiscount: prepared.details.managerDiscount,
+				isActive: prepared.isActive,
 				createdAt: now,
 				updatedAt: now,
 			});
-
-			if (!prepared.isActive) {
-				inactiveCount += 1;
-				await ctx.db.patch(ruleId, {
-					isActive: false,
-					updatedAt: Date.now(),
-				});
-			}
+			if (!prepared.isActive) inactiveCount += 1;
 		}
 
 		return {
 			success: true,
-			createdCount: preparedRows.length,
+			createdCount: preparedRows.size,
 			inactiveCount,
 		};
 	},
@@ -592,62 +714,38 @@ export const getApplicableForOrder = query({
 		productIds: v.array(v.id("products")),
 	},
 	handler: async (ctx, args) => {
-		if (!args.salesmanId || args.productIds.length === 0) {
-			return {} as Record<
-				string,
-				{
-					totalPercent: number;
-					rules: {
-						id: string;
-						name: string;
-						discountType: string;
-						discountPercent: number;
-					}[];
-				}
-			>;
+		if (args.productIds.length === 0) {
+			return {} as Record<string, { totalPercent: number; rules: { id: string; name: string; discountType: string; discountPercent: number }[] }>;
 		}
-
-		const salesmanId = args.salesmanId;
 
 		const rules = await ctx.db
 			.query("discountRules")
-			.withIndex("by_salesman", (q) => q.eq("salesmanId", salesmanId))
-			.filter((q) => q.eq(q.field("isActive"), true))
+			.withIndex("by_active", (q) => q.eq("isActive", true))
 			.collect();
 
-		const byProduct: Record<
-			string,
-			{
-				totalPercent: number;
-				rules: {
-					id: string;
-					name: string;
-					discountType: string;
-					discountPercent: number;
-				}[];
-			}
-		> = {};
+		const byProduct: Record<string, { totalPercent: number; rules: { id: string; name: string; discountType: string; discountPercent: number }[] }> = {};
 
 		for (const productId of args.productIds) {
 			const matched = rules.filter((rule) => {
-				const customerMatch =
-					!rule.customerId || rule.customerId === args.customerId;
+				const customerMatch = !rule.customerId || rule.customerId === args.customerId;
 				const productMatch = !rule.productId || rule.productId === productId;
 				return customerMatch && productMatch;
 			});
 
-			const totalPercent = clampPercent(
-				matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
+			const flattenedRules = matched.flatMap((rule) =>
+				getConfiguredDiscounts(rule).map((detail) => ({
+					id: String(rule._id),
+					name: rule.name,
+					discountType: detail.discountType,
+					discountPercent: detail.discountPercent,
+				})),
 			);
 
 			byProduct[productId] = {
-				totalPercent,
-				rules: matched.map((rule) => ({
-					id: String(rule._id),
-					name: rule.name,
-					discountType: rule.discountType,
-					discountPercent: rule.discountPercent,
-				})),
+				totalPercent: clampPercent(
+					flattenedRules.reduce((sum, rule) => sum + rule.discountPercent, 0),
+				),
+				rules: flattenedRules,
 			};
 		}
 
