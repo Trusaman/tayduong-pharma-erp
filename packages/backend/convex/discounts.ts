@@ -213,6 +213,7 @@ export const listWithDetails = query({
 export const create = mutation({
 	args: {
 		name: v.string(),
+		ruleGroupId: v.optional(v.string()),
 		discountType: discountTypeValidator,
 		customerId: v.optional(v.id("customers")),
 		productId: v.optional(v.id("products")),
@@ -226,6 +227,7 @@ export const create = mutation({
 		const now = Date.now();
 		return await ctx.db.insert("discountRules", {
 			name: args.name,
+			ruleGroupId: args.ruleGroupId?.trim() || undefined,
 			discountType: args.discountType,
 			customerId: args.customerId,
 			productId: args.productId,

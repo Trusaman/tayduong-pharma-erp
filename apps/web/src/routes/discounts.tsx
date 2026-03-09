@@ -131,7 +131,7 @@ const groupToDiscountType: Record<
 	manager: "Manager",
 };
 
-const discountTableColumnCount = 1 + 3 + discountGroups.length * 3 + 2;
+const discountTableColumnCount = 1 + 3 + discountGroups.length * 2 + 2;
 
 const discountWorkbookColumns = {
 	ruleName: "Tên quy tắc",
@@ -265,6 +265,23 @@ function DiscountsPage() {
 	const products = useQuery(api.products.list, { activeOnly: true });
 	const rules = useQuery(api.discounts.listWithDetails, { activeOnly: false });
 	type DiscountRuleRow = NonNullable<typeof rules>[number];
+	type DiscountRuleGroupRow = {
+		id: string;
+		name: string;
+		customerId?: DiscountRuleRow["customerId"];
+		customer: DiscountRuleRow["customer"] | null;
+		productId?: DiscountRuleRow["productId"];
+		product: DiscountRuleRow["product"] | null;
+		unitPrice?: DiscountRuleRow["unitPrice"];
+		createdByStaff: string;
+		notes?: DiscountRuleRow["notes"];
+		createdAt: number;
+		updatedAt: number;
+		totalDiscountPercent: number;
+		ruleIds: string[];
+		groupRules: DiscountRuleRow[];
+		rulesByGroup: Partial<Record<DiscountGroupKey, DiscountRuleRow>>;
+	};
 
 	const createSalesman = useMutation(api.salesmen.create);
 	const createDiscount = useMutation(api.discounts.create);
@@ -321,6 +338,35 @@ function DiscountsPage() {
 		}).format(value);
 	const formatPercentValue = (value: number) =>
 		`${formatDecimalNumber(value)}%`;
+
+	const getRuleGroupStatus = (groupRules: DiscountRuleRow[]) => {
+		const activeCount = groupRules.filter((rule) => rule.isActive).length;
+
+		if (activeCount === groupRules.length) {
+			return {
+				label: "Hoat dong",
+				className: "font-medium text-emerald-600 text-xs",
+				nextActionLabel: "Tam dung",
+				nextIsActive: false,
+			};
+		}
+
+		if (activeCount === 0) {
+			return {
+				label: "Tam dung",
+				className: "font-medium text-muted-foreground text-xs",
+				nextActionLabel: "Kich hoat",
+				nextIsActive: true,
+			};
+		}
+
+		return {
+			label: `Hoat dong ${activeCount}/${groupRules.length}`,
+			className: "font-medium text-amber-600 text-xs",
+			nextActionLabel: "Kich hoat tat ca",
+			nextIsActive: true,
+		};
+	};
 
 	const parseLocalizedNumber = (value: string): number | undefined => {
 		const trimmed = value.trim();
@@ -409,6 +455,7 @@ function DiscountsPage() {
 				salesmanId: Id<"salesmen">;
 				percent: number;
 			}> = [];
+			const ruleGroupId = crypto.randomUUID();
 
 			for (const group of discountGroups) {
 				const groupData = discountForm[group.key];
@@ -432,6 +479,7 @@ function DiscountsPage() {
 
 			for (const rule of rulesToCreate) {
 				await createDiscount({
+					ruleGroupId,
 					name:
 						discountForm.name ||
 						`${discountTypeLabels[rule.discountType]} - ${new Date().toLocaleDateString("vi-VN")}`,
@@ -452,7 +500,9 @@ function DiscountsPage() {
 
 			setDiscountDialogOpen(false);
 			setDiscountForm(createEmptyDiscountForm());
-			toast.success(`Đã tạo ${rulesToCreate.length} quy tắc chiết khấu`);
+			toast.success(
+				`Da tao 1 nhom chiet khau voi ${rulesToCreate.length} loai`,
+			);
 		} catch (error) {
 			toast.error(
 				error instanceof Error
@@ -565,18 +615,77 @@ function DiscountsPage() {
 		);
 	}, [rules]);
 
-	const filteredRules = rules?.filter((rule) => {
-		const keyword = search.trim().toLowerCase();
-		if (pendingRemovedRuleIds.includes(String(rule._id))) return false;
-		if (!keyword) return true;
-		return (rule.product?.name ?? "").toLowerCase().includes(keyword);
-	});
+	const filteredRuleGroups = (() => {
+		if (!rules) return undefined;
 
-	const visibleRuleIds = (filteredRules ?? []).map((rule) => String(rule._id));
+		const keyword = search.trim().toLowerCase();
+		const groupedRules = new Map<string, DiscountRuleGroupRow>();
+
+		for (const rule of rules) {
+			if (pendingRemovedRuleIds.includes(String(rule._id))) continue;
+
+			const groupId = rule.ruleGroupId?.trim() || String(rule._id);
+			const existingGroup = groupedRules.get(groupId);
+
+			if (existingGroup) {
+				existingGroup.totalDiscountPercent += rule.discountPercent;
+				existingGroup.updatedAt = Math.max(
+					existingGroup.updatedAt,
+					rule.updatedAt,
+				);
+				existingGroup.createdAt = Math.min(
+					existingGroup.createdAt,
+					rule.createdAt,
+				);
+				existingGroup.ruleIds.push(String(rule._id));
+				existingGroup.groupRules.push(rule);
+
+				const groupKey = discountTypeToGroup[rule.discountType];
+				const currentRule = existingGroup.rulesByGroup[groupKey];
+				if (!currentRule || rule.updatedAt >= currentRule.updatedAt) {
+					existingGroup.rulesByGroup[groupKey] = rule;
+				}
+
+				continue;
+			}
+
+			groupedRules.set(groupId, {
+				id: groupId,
+				name: rule.name,
+				customerId: rule.customerId,
+				customer: rule.customer ?? null,
+				productId: rule.productId,
+				product: rule.product ?? null,
+				unitPrice: rule.unitPrice,
+				createdByStaff: rule.createdByStaff,
+				notes: rule.notes,
+				createdAt: rule.createdAt,
+				updatedAt: rule.updatedAt,
+				totalDiscountPercent: rule.discountPercent,
+				ruleIds: [String(rule._id)],
+				groupRules: [rule],
+				rulesByGroup: {
+					[discountTypeToGroup[rule.discountType]]: rule,
+				},
+			});
+		}
+
+		return Array.from(groupedRules.values())
+			.filter((group) => {
+				if (!keyword) return true;
+				return (group.product?.name ?? "").toLowerCase().includes(keyword);
+			})
+			.sort((left, right) => right.createdAt - left.createdAt);
+	})();
+
+	const visibleRuleIds = (filteredRuleGroups ?? []).map((group) => group.id);
 	const visibleRuleIdsKey = visibleRuleIds.join("||");
 	const allVisibleSelected =
 		visibleRuleIds.length > 0 &&
 		visibleRuleIds.every((id) => selectedRuleIds.includes(id));
+	const selectedRuleGroups = (filteredRuleGroups ?? []).filter((group) =>
+		selectedRuleIds.includes(group.id),
+	);
 
 	useEffect(() => {
 		const visibleIdSet = new Set(
@@ -610,31 +719,84 @@ function DiscountsPage() {
 		);
 	};
 
+	const toggleRuleGroupActive = async (group: DiscountRuleGroupRow) => {
+		const status = getRuleGroupStatus(group.groupRules);
+		const targetRules = group.groupRules.filter(
+			(rule) => rule.isActive !== status.nextIsActive,
+		);
+
+		if (targetRules.length === 0) return;
+
+		try {
+			await Promise.all(
+				targetRules.map((rule) =>
+					updateDiscount({ id: rule._id, isActive: status.nextIsActive }),
+				),
+			);
+			toast.success("Da cap nhat trang thai nhom chiet khau");
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Khong the cap nhat trang thai nhom chiet khau",
+			);
+		}
+	};
+
+	const handleRemoveDiscountGroup = async (group: DiscountRuleGroupRow) => {
+		const removingIds = [...group.ruleIds];
+
+		try {
+			setPendingRemovedRuleIds((prev) => [
+				...new Set([...prev, ...removingIds]),
+			]);
+			setExpandedRuleIds((prev) => prev.filter((id) => id !== group.id));
+			setSelectedRuleIds((prev) => prev.filter((id) => id !== group.id));
+			await removeManyDiscounts({
+				ids: removingIds as Id<"discountRules">[],
+			});
+			toast.success("Da xoa nhom chiet khau");
+		} catch (error) {
+			setPendingRemovedRuleIds((prev) =>
+				prev.filter((id) => !removingIds.includes(id)),
+			);
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Khong the xoa nhom chiet khau",
+			);
+		}
+	};
+
 	const handleRemoveSelectedDiscounts = async () => {
-		if (selectedRuleIds.length === 0) return;
-		const removingIds = [...selectedRuleIds];
+		if (selectedRuleGroups.length === 0) return;
+		const removingIds = [
+			...new Set(selectedRuleGroups.flatMap((group) => group.ruleIds)),
+		];
+		const removingGroupIds = selectedRuleGroups.map((group) => group.id);
+
 		try {
 			setBulkDeleteDialogOpen(false);
 			setPendingRemovedRuleIds((prev) => [
 				...new Set([...prev, ...removingIds]),
 			]);
 			setExpandedRuleIds((prev) =>
-				prev.filter((id) => !removingIds.includes(id)),
+				prev.filter((id) => !removingGroupIds.includes(id)),
 			);
 			setSelectedRuleIds([]);
 			await removeManyDiscounts({
 				ids: removingIds as Id<"discountRules">[],
 			});
-			toast.success(`Đã xóa ${removingIds.length} quy tắc chiết khấu`);
+			toast.success(`Da xoa ${selectedRuleGroups.length} nhom chiet khau`);
 		} catch (error) {
 			setPendingRemovedRuleIds((prev) =>
 				prev.filter((id) => !removingIds.includes(id)),
 			);
-			setSelectedRuleIds(removingIds);
+			setSelectedRuleIds(removingGroupIds);
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Không thể xóa danh sách quy tắc chiết khấu",
+					: "Khong the xoa danh sach nhom chiet khau",
 			);
 		}
 	};
@@ -647,32 +809,36 @@ function DiscountsPage() {
 	};
 
 	const handleExportXlsx = async () => {
-		if (!filteredRules || filteredRules.length === 0) {
+		if (!filteredRuleGroups || filteredRuleGroups.length === 0) {
 			toast.error("Không có dữ liệu để xuất");
 			return;
 		}
 
 		try {
 			const XLSX = await import("xlsx");
-			const rows = filteredRules.map((rule) => ({
-				[discountWorkbookColumns.ruleName]: rule.name,
-				[discountWorkbookColumns.discountTypeCode]:
-					discountTypeCodeByValue[rule.discountType],
-				[discountWorkbookColumns.discountTypeLabel]:
-					discountTypeLabels[rule.discountType],
-				[discountWorkbookColumns.customerCode]: rule.customer?.code ?? "",
-				[discountWorkbookColumns.customerName]: rule.customer?.name ?? "",
-				[discountWorkbookColumns.productSku]: rule.product?.sku ?? "",
-				[discountWorkbookColumns.productName]: rule.product?.name ?? "",
-				[discountWorkbookColumns.salesmanCode]: rule.salesman?.code ?? "",
-				[discountWorkbookColumns.salesmanName]: rule.salesman?.name ?? "",
-				[discountWorkbookColumns.totalDiscountPercent]: rule.discountPercent,
-				[discountWorkbookColumns.unitPrice]:
-					typeof rule.unitPrice === "number" ? rule.unitPrice : "",
-				[discountWorkbookColumns.createdBy]: rule.createdByStaff,
-				[discountWorkbookColumns.notes]: rule.notes ?? "",
-				[discountWorkbookColumns.status]: rule.isActive ? "active" : "inactive",
-			}));
+			const rows = filteredRuleGroups.flatMap((group) =>
+				group.groupRules.map((rule) => ({
+					[discountWorkbookColumns.ruleName]: rule.name,
+					[discountWorkbookColumns.discountTypeCode]:
+						discountTypeCodeByValue[rule.discountType],
+					[discountWorkbookColumns.discountTypeLabel]:
+						discountTypeLabels[rule.discountType],
+					[discountWorkbookColumns.customerCode]: rule.customer?.code ?? "",
+					[discountWorkbookColumns.customerName]: rule.customer?.name ?? "",
+					[discountWorkbookColumns.productSku]: rule.product?.sku ?? "",
+					[discountWorkbookColumns.productName]: rule.product?.name ?? "",
+					[discountWorkbookColumns.salesmanCode]: rule.salesman?.code ?? "",
+					[discountWorkbookColumns.salesmanName]: rule.salesman?.name ?? "",
+					[discountWorkbookColumns.totalDiscountPercent]: rule.discountPercent,
+					[discountWorkbookColumns.unitPrice]:
+						typeof rule.unitPrice === "number" ? rule.unitPrice : "",
+					[discountWorkbookColumns.createdBy]: rule.createdByStaff,
+					[discountWorkbookColumns.notes]: rule.notes ?? "",
+					[discountWorkbookColumns.status]: rule.isActive
+						? "active"
+						: "inactive",
+				})),
+			);
 
 			const worksheet = XLSX.utils.json_to_sheet(rows, {
 				header: [...discountWorkbookHeaderOrder],
@@ -918,7 +1084,7 @@ function DiscountsPage() {
 			[groupKey]: { ...prev[groupKey], [field]: value },
 		}));
 
-	const toggleRuleDetails = (id: Id<"discountRules">) => {
+	const toggleRuleDetails = (id: string) => {
 		const targetId = String(id);
 		setExpandedRuleIds((prev) =>
 			prev.includes(targetId)
@@ -1533,20 +1699,20 @@ function DiscountsPage() {
 									render={
 										<Button
 											variant="destructive"
-											disabled={selectedRuleIds.length === 0}
+											disabled={selectedRuleGroups.length === 0}
 										/>
 									}
 								>
 									<Trash2 className="mr-2 h-4 w-4" />
-									Xóa đã chọn ({selectedRuleIds.length})
+									Xóa đã chọn ({selectedRuleGroups.length})
 								</AlertDialogTrigger>
 								<AlertDialogContent>
 									<AlertDialogHeader>
 										<AlertDialogTitle>Xác nhận xóa hàng loạt</AlertDialogTitle>
 										<AlertDialogDescription>
 											Bạn có chắc muốn xóa{" "}
-											<strong>{selectedRuleIds.length}</strong> quy tắc chiết
-											khấu đã chọn?
+											<strong>{selectedRuleGroups.length}</strong> nhom chiet
+											khau da chon?
 										</AlertDialogDescription>
 									</AlertDialogHeader>
 									<AlertDialogFooter>
@@ -1572,14 +1738,14 @@ function DiscountsPage() {
 				</CardHeader>
 				<CardContent>
 					{rules === undefined ? (
-						<div className="text-muted-foreground">Đang tải...</div>
+						<div className="text-muted-foreground">Dang tai...</div>
 					) : rules.length === 0 ? (
 						<div className="text-muted-foreground">
-							Chưa có quy tắc chiết khấu nào
+							Chua co quy tac chiet khau nao
 						</div>
-					) : !filteredRules || filteredRules.length === 0 ? (
+					) : !filteredRuleGroups || filteredRuleGroups.length === 0 ? (
 						<div className="text-muted-foreground">
-							Không tìm thấy quy tắc theo tên sản phẩm/thuốc
+							Khong tim thay quy tac theo ten san pham/thuoc
 						</div>
 					) : (
 						<div className="overflow-x-auto">
@@ -1596,60 +1762,55 @@ function DiscountsPage() {
 												disabled={visibleRuleIds.length === 0}
 											/>
 										</TableHead>
-										<TableHead rowSpan={2}>Ngày hạch toán</TableHead>
+										<TableHead rowSpan={2}>Ngay hach toan</TableHead>
 										<TableHead rowSpan={2} className="text-right">
-											Đơn giá
-										</TableHead>
-										<TableHead rowSpan={2} className="text-right">
-											Tổng chiết khấu (%)
+											Don gia
 										</TableHead>
 										{discountGroups.map((group) => (
 											<TableHead
 												key={group.key}
-												colSpan={3}
+												colSpan={2}
 												className="text-center"
 											>
 												{group.label}
 											</TableHead>
 										))}
 										<TableHead rowSpan={2} className="text-right">
-											Tổng chiết khấu
+											Tong chiet khau
 										</TableHead>
 										<TableHead rowSpan={2} className="text-right">
-											Trạng thái
+											Trang thai
 										</TableHead>
 									</TableRow>
 									<TableRow>
 										{discountGroups.map((group) => (
 											<Fragment key={`${group.key}-sub`}>
-												<TableHead className="text-right">Tỷ lệ</TableHead>
-												<TableHead className="text-right">Thành tiền</TableHead>
+												<TableHead className="text-right">Ty le</TableHead>
 												<TableHead className="text-center">
-													Người nhận
+													Nguoi nhan
 												</TableHead>
 											</Fragment>
 										))}
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{filteredRules.map((rule) => {
-										const activeGroup = discountTypeToGroup[rule.discountType];
+									{filteredRuleGroups.map((ruleGroup) => {
 										const ruleUnitPrice =
-											typeof rule.unitPrice === "number"
-												? rule.unitPrice
-												: rule.product?.salePrice;
-										const isExpanded = expandedRuleIds.includes(
-											String(rule._id),
+											typeof ruleGroup.unitPrice === "number"
+												? ruleGroup.unitPrice
+												: ruleGroup.product?.salePrice;
+										const isExpanded = expandedRuleIds.includes(ruleGroup.id);
+										const isSelected = selectedRuleIds.includes(ruleGroup.id);
+										const groupStatus = getRuleGroupStatus(
+											ruleGroup.groupRules,
 										);
-										const isSelected = selectedRuleIds.includes(
-											String(rule._id),
-										);
-										const historyEntries = [...rule.editHistory].sort(
-											(a, b) => b.editedAt - a.editedAt,
-										);
+										const detailRules = discountGroups.flatMap((group) => {
+											const detailRule = ruleGroup.rulesByGroup[group.key];
+											return detailRule ? [detailRule] : [];
+										});
 
 										return (
-											<Fragment key={rule._id}>
+											<Fragment key={ruleGroup.id}>
 												<TableRow>
 													<TableCell className="text-center">
 														<input
@@ -1657,7 +1818,7 @@ function DiscountsPage() {
 															checked={isSelected}
 															onChange={(e) =>
 																toggleRuleSelection(
-																	String(rule._id),
+																	ruleGroup.id,
 																	e.target.checked,
 																)
 															}
@@ -1665,150 +1826,146 @@ function DiscountsPage() {
 													</TableCell>
 													<TableCell>
 														<div className="font-medium">
-															{formatDate(rule.createdAt)}
+															{formatDate(ruleGroup.createdAt)}
 														</div>
 														<div className="text-muted-foreground text-xs">
-															{rule.name}
+															{ruleGroup.name}
 														</div>
 														<div className="text-muted-foreground text-xs">
-															{rule.product?.name
-																? `Sản phẩm/Thuốc: ${rule.product.name}`
-																: "Sản phẩm/Thuốc: Tất cả sản phẩm/thuốc"}
+															{ruleGroup.product?.name
+																? `San pham/Thuoc: ${ruleGroup.product.name}`
+																: "San pham/Thuoc: Tat ca san pham/thuoc"}
 														</div>
 													</TableCell>
 													<TableCell className="text-right">
 														{typeof ruleUnitPrice === "number"
-															? `${formatDecimalNumber(ruleUnitPrice)} đ`
+															? `${formatDecimalNumber(ruleUnitPrice)} VND`
 															: "-"}
 													</TableCell>
-													<TableCell className="text-right">
-														{formatPercentValue(rule.discountPercent)}
-													</TableCell>
 													{discountGroups.map((group) => {
-														const isActiveGroup = group.key === activeGroup;
+														const groupRule = ruleGroup.rulesByGroup[group.key];
 														return (
-															<Fragment key={`${rule._id}-${group.key}`}>
+															<Fragment key={`${ruleGroup.id}-${group.key}`}>
 																<TableCell className="text-right">
-																	{isActiveGroup
-																		? formatPercentValue(rule.discountPercent)
+																	{groupRule
+																		? formatPercentValue(
+																				groupRule.discountPercent,
+																			)
 																		: "0%"}
 																</TableCell>
-																<TableCell className="text-right">-</TableCell>
 																<TableCell className="text-center">
-																	{isActiveGroup
-																		? (rule.salesman?.name ??
-																			rule.createdByStaff)
-																		: ""}
+																	{groupRule?.salesman?.name ?? "-"}
 																</TableCell>
 															</Fragment>
 														);
 													})}
 													<TableCell className="text-right">
-														{formatPercentValue(rule.discountPercent)}
+														{formatPercentValue(ruleGroup.totalDiscountPercent)}
 													</TableCell>
 													<TableCell className="text-right">
 														<div className="space-y-2">
-															<div
-																className={
-																	rule.isActive
-																		? "font-medium text-emerald-600 text-xs"
-																		: "font-medium text-muted-foreground text-xs"
-																}
-															>
-																{rule.isActive ? "Hoạt động" : "Tạm dừng"}
+															<div className={groupStatus.className}>
+																{groupStatus.label}
 															</div>
 															<div className="flex flex-wrap justify-end gap-2">
 																<Button
 																	size="sm"
 																	variant="outline"
-																	onClick={() => toggleRuleDetails(rule._id)}
+																	onClick={() =>
+																		toggleRuleDetails(ruleGroup.id)
+																	}
 																>
 																	{isExpanded ? (
 																		<ChevronUp className="mr-1 h-3.5 w-3.5" />
 																	) : (
 																		<ChevronDown className="mr-1 h-3.5 w-3.5" />
 																	)}
-																	Chi tiết
+																	Chi tiet
 																</Button>
-																<AlertDialog>
-																	<AlertDialogTrigger
-																		render={
-																			<Button size="sm" variant="outline" />
+																{ruleGroup.groupRules.length === 1 ? (
+																	<AlertDialog>
+																		<AlertDialogTrigger
+																			render={
+																				<Button size="sm" variant="outline" />
+																			}
+																		>
+																			<Pencil className="mr-1 h-3.5 w-3.5" />
+																			Sua
+																		</AlertDialogTrigger>
+																		<AlertDialogContent>
+																			<AlertDialogHeader>
+																				<AlertDialogTitle>
+																					Tiep tuc chinh sua chiet khau?
+																				</AlertDialogTitle>
+																				<AlertDialogDescription>
+																					Ban sap chinh sua quy tac{" "}
+																					<strong>
+																						"{ruleGroup.groupRules[0].name}"
+																					</strong>
+																					.
+																				</AlertDialogDescription>
+																			</AlertDialogHeader>
+																			<AlertDialogFooter>
+																				<AlertDialogCancel>
+																					Huy
+																				</AlertDialogCancel>
+																				<AlertDialogAction
+																					onClick={() =>
+																						startEditingRule(
+																							ruleGroup.groupRules[0],
+																						)
+																					}
+																				>
+																					Tiep tuc chinh sua
+																				</AlertDialogAction>
+																			</AlertDialogFooter>
+																		</AlertDialogContent>
+																	</AlertDialog>
+																) : null}
+																{groupStatus.nextIsActive ? (
+																	<Button
+																		size="sm"
+																		variant="outline"
+																		onClick={() =>
+																			toggleRuleGroupActive(ruleGroup)
 																		}
 																	>
-																		<Pencil className="mr-1 h-3.5 w-3.5" />
-																		Sửa
-																	</AlertDialogTrigger>
-																	<AlertDialogContent>
-																		<AlertDialogHeader>
-																			<AlertDialogTitle>
-																				Tiếp tục chỉnh sửa chiết khấu?
-																			</AlertDialogTitle>
-																			<AlertDialogDescription>
-																				Bạn sắp chỉnh sửa quy tắc{" "}
-																				<strong>"{rule.name}"</strong>. Hệ thống
-																				sẽ lưu lại lịch sử thay đổi sau khi bạn
-																				lưu.
-																			</AlertDialogDescription>
-																		</AlertDialogHeader>
-																		<AlertDialogFooter>
-																			<AlertDialogCancel>Huỷ</AlertDialogCancel>
-																			<AlertDialogAction
-																				onClick={() => startEditingRule(rule)}
-																			>
-																				Tiếp tục chỉnh sửa
-																			</AlertDialogAction>
-																		</AlertDialogFooter>
-																	</AlertDialogContent>
-																</AlertDialog>
-																{rule.isActive ? (
+																		{groupStatus.nextActionLabel}
+																	</Button>
+																) : (
 																	<AlertDialog>
 																		<AlertDialogTrigger
 																			render={
 																				<Button size="sm" variant="secondary" />
 																			}
 																		>
-																			Hoạt động
+																			{groupStatus.label}
 																		</AlertDialogTrigger>
 																		<AlertDialogContent>
 																			<AlertDialogHeader>
 																				<AlertDialogTitle>
-																					Xác nhận tạm dừng
+																					Xac nhan tam dung
 																				</AlertDialogTitle>
 																				<AlertDialogDescription>
-																					Bạn có chắc muốn{" "}
-																					<strong>tạm dừng</strong> quy tắc{" "}
-																					<strong>"{rule.name}"</strong>?
+																					Ban co chac muon tam dung toan bo nhom{" "}
+																					<strong>"{ruleGroup.name}"</strong>?
 																				</AlertDialogDescription>
 																			</AlertDialogHeader>
 																			<AlertDialogFooter>
 																				<AlertDialogCancel>
-																					Huỷ
+																					Huy
 																				</AlertDialogCancel>
 																				<AlertDialogAction
 																					className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 																					onClick={() =>
-																						toggleRuleActive(
-																							rule._id,
-																							rule.isActive,
-																						)
+																						toggleRuleGroupActive(ruleGroup)
 																					}
 																				>
-																					Tạm dừng
+																					{groupStatus.nextActionLabel}
 																				</AlertDialogAction>
 																			</AlertDialogFooter>
 																		</AlertDialogContent>
 																	</AlertDialog>
-																) : (
-																	<Button
-																		size="sm"
-																		variant="outline"
-																		onClick={() =>
-																			toggleRuleActive(rule._id, rule.isActive)
-																		}
-																	>
-																		Kích hoạt
-																	</Button>
 																)}
 																<AlertDialog>
 																	<AlertDialogTrigger
@@ -1817,27 +1974,28 @@ function DiscountsPage() {
 																		}
 																	>
 																		<Trash2 className="mr-1 h-3.5 w-3.5" />
-																		Xóa
+																		Xoa
 																	</AlertDialogTrigger>
 																	<AlertDialogContent>
 																		<AlertDialogHeader>
 																			<AlertDialogTitle>
-																				Xác nhận xóa chiết khấu
+																				Xac nhan xoa chiet khau
 																			</AlertDialogTitle>
 																			<AlertDialogDescription>
-																				Bạn có chắc muốn <strong>xóa</strong>{" "}
-																				quy tắc <strong>"{rule.name}"</strong>?
+																				Ban co chac muon <strong>xoa</strong>{" "}
+																				nhom chiet khau{" "}
+																				<strong>"{ruleGroup.name}"</strong>?
 																			</AlertDialogDescription>
 																		</AlertDialogHeader>
 																		<AlertDialogFooter>
-																			<AlertDialogCancel>Huỷ</AlertDialogCancel>
+																			<AlertDialogCancel>Huy</AlertDialogCancel>
 																			<AlertDialogAction
 																				className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 																				onClick={() =>
-																					handleRemoveDiscount(rule._id)
+																					handleRemoveDiscountGroup(ruleGroup)
 																				}
 																			>
-																				Xóa chiết khấu
+																				Xoa nhom chiet khau
 																			</AlertDialogAction>
 																		</AlertDialogFooter>
 																	</AlertDialogContent>
@@ -1853,96 +2011,215 @@ function DiscountsPage() {
 																<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
 																	<div>
 																		<div className="text-muted-foreground text-xs">
-																			Loại chiết khấu
+																			Khach hang
 																		</div>
 																		<div className="font-medium text-sm">
-																			{discountTypeLabels[rule.discountType]}
+																			{ruleGroup.customer?.name ??
+																				"Tat ca khach hang"}
 																		</div>
 																	</div>
 																	<div>
 																		<div className="text-muted-foreground text-xs">
-																			Khách hàng
+																			San pham/Thuoc
 																		</div>
 																		<div className="font-medium text-sm">
-																			{rule.customer?.name ??
-																				"Tất cả khách hàng"}
+																			{ruleGroup.product?.name ??
+																				"Tat ca san pham/thuoc"}
 																		</div>
 																	</div>
 																	<div>
 																		<div className="text-muted-foreground text-xs">
-																			Người nhận
+																			Nguoi tao
 																		</div>
 																		<div className="font-medium text-sm">
-																			{rule.salesman?.name ?? "-"}
+																			{ruleGroup.createdByStaff}
 																		</div>
 																	</div>
 																	<div>
 																		<div className="text-muted-foreground text-xs">
-																			Cập nhật gần nhất
+																			Cap nhat gan nhat
 																		</div>
 																		<div className="font-medium text-sm">
-																			{formatDateTime(rule.updatedAt)}
+																			{formatDateTime(ruleGroup.updatedAt)}
 																		</div>
 																	</div>
 																</div>
 																<div>
 																	<div className="text-muted-foreground text-xs">
-																		Ghi chú
+																		Ghi chu
 																	</div>
 																	<div className="text-sm">
-																		{rule.notes?.trim()
-																			? rule.notes
-																			: "Không có ghi chú"}
+																		{ruleGroup.notes?.trim()
+																			? ruleGroup.notes
+																			: "Khong co ghi chu"}
 																	</div>
 																</div>
-																<div className="space-y-3">
-																	<div className="font-medium text-sm">
-																		Lịch sử chỉnh sửa
-																	</div>
-																	{historyEntries.length === 0 ? (
-																		<div className="text-muted-foreground text-sm">
-																			Chưa có lịch sử chỉnh sửa.
-																		</div>
-																	) : (
-																		<div className="space-y-3">
-																			{historyEntries.map((entry, index) => (
-																				<div
-																					key={`${rule._id}-${entry.editedAt}-${index}`}
-																					className="rounded-md border bg-background p-3"
-																				>
-																					<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+																<div className="grid gap-3 lg:grid-cols-2">
+																	{detailRules.map((rule) => {
+																		const historyEntries = [
+																			...rule.editHistory,
+																		].sort((a, b) => b.editedAt - a.editedAt);
+																		const detailStatus = rule.isActive
+																			? "Hoat dong"
+																			: "Tam dung";
+
+																		return (
+																			<div
+																				key={rule._id}
+																				className="rounded-md border bg-background p-4"
+																			>
+																				<div className="flex flex-col gap-2 border-b pb-3 sm:flex-row sm:items-start sm:justify-between">
+																					<div>
 																						<div className="font-medium text-sm">
-																							{entry.editedBy}
+																							{
+																								discountTypeLabels[
+																									rule.discountType
+																								]
+																							}
 																						</div>
 																						<div className="text-muted-foreground text-xs">
-																							{formatDateTime(entry.editedAt)}
+																							{detailStatus}
 																						</div>
 																					</div>
-																					<div className="mt-3 space-y-2">
-																						{entry.changes.map(
-																							(change, changeIndex) => (
-																								<div
-																									key={`${entry.editedAt}-${change.field}-${changeIndex}`}
-																									className="rounded-sm bg-muted/50 px-3 py-2 text-sm"
-																								>
-																									<div className="font-medium">
-																										{historyFieldLabels[
-																											change.field
-																										] ?? change.field}
-																									</div>
-																									<div className="text-muted-foreground text-xs">
-																										{historyValue(change.from)}{" "}
-																										{" -> "}{" "}
-																										{historyValue(change.to)}
-																									</div>
-																								</div>
-																							),
-																						)}
+																					<div className="flex flex-wrap gap-2">
+																						<Button
+																							size="sm"
+																							variant="outline"
+																							onClick={() =>
+																								startEditingRule(rule)
+																							}
+																						>
+																							<Pencil className="mr-1 h-3.5 w-3.5" />
+																							Sua
+																						</Button>
+																						<Button
+																							size="sm"
+																							variant="outline"
+																							onClick={() =>
+																								toggleRuleActive(
+																									rule._id,
+																									rule.isActive,
+																								)
+																							}
+																						>
+																							{rule.isActive
+																								? "Tam dung"
+																								: "Kich hoat"}
+																						</Button>
+																						<Button
+																							size="sm"
+																							variant="destructive"
+																							onClick={() =>
+																								handleRemoveDiscount(rule._id)
+																							}
+																						>
+																							<Trash2 className="mr-1 h-3.5 w-3.5" />
+																							Xoa
+																						</Button>
 																					</div>
 																				</div>
-																			))}
-																		</div>
-																	)}
+																				<div className="mt-3 grid gap-3 md:grid-cols-2">
+																					<div>
+																						<div className="text-muted-foreground text-xs">
+																							Ty le
+																						</div>
+																						<div className="font-medium text-sm">
+																							{formatPercentValue(
+																								rule.discountPercent,
+																							)}
+																						</div>
+																					</div>
+																					<div>
+																						<div className="text-muted-foreground text-xs">
+																							Nguoi nhan
+																						</div>
+																						<div className="font-medium text-sm">
+																							{rule.salesman?.name ?? "-"}
+																						</div>
+																					</div>
+																					<div>
+																						<div className="text-muted-foreground text-xs">
+																							Don gia
+																						</div>
+																						<div className="font-medium text-sm">
+																							{typeof rule.unitPrice ===
+																							"number"
+																								? `${formatDecimalNumber(rule.unitPrice)} VND`
+																								: "-"}
+																						</div>
+																					</div>
+																					<div>
+																						<div className="text-muted-foreground text-xs">
+																							Cap nhat gan nhat
+																						</div>
+																						<div className="font-medium text-sm">
+																							{formatDateTime(rule.updatedAt)}
+																						</div>
+																					</div>
+																				</div>
+																				<div className="mt-4 space-y-3">
+																					<div className="font-medium text-sm">
+																						Lich su chinh sua
+																					</div>
+																					{historyEntries.length === 0 ? (
+																						<div className="text-muted-foreground text-sm">
+																							Chua co lich su chinh sua.
+																						</div>
+																					) : (
+																						<div className="space-y-3">
+																							{historyEntries.map(
+																								(entry, index) => (
+																									<div
+																										key={`${rule._id}-${entry.editedAt}-${index}`}
+																										className="rounded-md border bg-muted/30 p-3"
+																									>
+																										<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+																											<div className="font-medium text-sm">
+																												{entry.editedBy}
+																											</div>
+																											<div className="text-muted-foreground text-xs">
+																												{formatDateTime(
+																													entry.editedAt,
+																												)}
+																											</div>
+																										</div>
+																										<div className="mt-3 space-y-2">
+																											{entry.changes.map(
+																												(
+																													change,
+																													changeIndex,
+																												) => (
+																													<div
+																														key={`${entry.editedAt}-${change.field}-${changeIndex}`}
+																														className="rounded-sm bg-background px-3 py-2 text-sm"
+																													>
+																														<div className="font-medium">
+																															{historyFieldLabels[
+																																change.field
+																															] ?? change.field}
+																														</div>
+																														<div className="text-muted-foreground text-xs">
+																															{historyValue(
+																																change.from,
+																															)}{" "}
+																															{" -> "}{" "}
+																															{historyValue(
+																																change.to,
+																															)}
+																														</div>
+																													</div>
+																												),
+																											)}
+																										</div>
+																									</div>
+																								),
+																							)}
+																						</div>
+																					)}
+																				</div>
+																			</div>
+																		);
+																	})}
 																</div>
 															</div>
 														</TableCell>

@@ -85,6 +85,7 @@ export default defineSchema({
 	// Discount Rules
 	discountRules: defineTable({
 		name: v.string(),
+		ruleGroupId: v.optional(v.string()),
 		discountType: v.union(
 			v.literal("Doctor"),
 			v.literal("hospital"),
