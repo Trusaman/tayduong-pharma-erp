@@ -415,6 +415,82 @@ function DiscountsPage() {
 		historyFieldLabels[field] ?? field;
 	const isHistoryValueEmpty = (value?: string) =>
 		value === undefined || value === null || value === "";
+	const tokenizeHistoryValue = (value: string) =>
+		value.match(/[\p{L}\p{N}_]+|[^\p{L}\p{N}_]+/gu) ?? [value];
+	const getHistoryDiffParts = (value?: string, compareTo?: string) => {
+		if (isHistoryValueEmpty(value)) {
+			return [{ text: "(trống)", changed: !isHistoryValueEmpty(compareTo) }];
+		}
+
+		if (isHistoryValueEmpty(compareTo)) {
+			return [{ text: value, changed: true }];
+		}
+
+		const valueTokens = tokenizeHistoryValue(value);
+		const compareTokens = tokenizeHistoryValue(compareTo);
+		const lcs = Array.from({ length: valueTokens.length + 1 }, () =>
+			Array.from<number>({ length: compareTokens.length + 1 }).fill(0),
+		);
+
+		for (
+			let valueIndex = valueTokens.length - 1;
+			valueIndex >= 0;
+			valueIndex -= 1
+		) {
+			for (
+				let compareIndex = compareTokens.length - 1;
+				compareIndex >= 0;
+				compareIndex -= 1
+			) {
+				if (valueTokens[valueIndex] === compareTokens[compareIndex]) {
+					lcs[valueIndex][compareIndex] =
+						lcs[valueIndex + 1][compareIndex + 1] + 1;
+				} else {
+					lcs[valueIndex][compareIndex] = Math.max(
+						lcs[valueIndex + 1][compareIndex],
+						lcs[valueIndex][compareIndex + 1],
+					);
+				}
+			}
+		}
+
+		const changed = Array.from<boolean>({ length: valueTokens.length }).fill(
+			false,
+		);
+		let valueIndex = 0;
+		let compareIndex = 0;
+
+		while (
+			valueIndex < valueTokens.length &&
+			compareIndex < compareTokens.length
+		) {
+			if (valueTokens[valueIndex] === compareTokens[compareIndex]) {
+				valueIndex += 1;
+				compareIndex += 1;
+				continue;
+			}
+
+			if (
+				lcs[valueIndex + 1][compareIndex] >= lcs[valueIndex][compareIndex + 1]
+			) {
+				changed[valueIndex] = true;
+				valueIndex += 1;
+				continue;
+			}
+
+			compareIndex += 1;
+		}
+
+		while (valueIndex < valueTokens.length) {
+			changed[valueIndex] = true;
+			valueIndex += 1;
+		}
+
+		return valueTokens.map((text, index) => ({
+			text,
+			changed: changed[index],
+		}));
+	};
 	const getHistoryFieldBadgeVariant = (field: string) => {
 		if (field.endsWith("Discount")) return "default" as const;
 		if (field === "isActive") return "secondary" as const;
@@ -429,6 +505,30 @@ function DiscountsPage() {
 			return { label: "Xóa giá trị", variant: "destructive" as const };
 		}
 		return { label: "Cập nhật", variant: "outline" as const };
+	};
+	const renderHistoryDiffValue = (
+		value: string | undefined,
+		compareTo: string | undefined,
+		side: "from" | "to",
+	) => {
+		const parts = getHistoryDiffParts(value, compareTo);
+		const changedClass =
+			side === "from"
+				? "rounded bg-destructive/10 px-1 py-0.5 text-destructive"
+				: "rounded bg-primary/15 px-1 py-0.5 font-medium text-primary";
+
+		return (
+			<span className="whitespace-pre-wrap break-words text-xs leading-5">
+				{parts.map((part, index) => (
+					<span
+						key={`${side}-${index}-${part.text}`}
+						className={part.changed ? changedClass : undefined}
+					>
+						{part.text}
+					</span>
+				))}
+			</span>
+		);
 	};
 
 	const closeEditDialog = () => {
@@ -1872,7 +1972,11 @@ function DiscountsPage() {
 																				Từ
 																			</div>
 																			<div className="mt-1 break-words text-xs">
-																				{change.from ?? "(trống)"}
+																				{renderHistoryDiffValue(
+																					change.from,
+																					change.to,
+																					"from",
+																				)}
 																			</div>
 																		</div>
 																		<div className="rounded-md border border-primary/20 bg-primary/5 p-3">
@@ -1880,7 +1984,11 @@ function DiscountsPage() {
 																				Thành
 																			</div>
 																			<div className="mt-1 break-words text-xs">
-																				{change.to ?? "(trống)"}
+																				{renderHistoryDiffValue(
+																					change.to,
+																					change.from,
+																					"to",
+																				)}
 																			</div>
 																		</div>
 																	</div>
