@@ -6,6 +6,7 @@ const discountTypeValidator = v.union(
 	v.literal("Doctor"),
 	v.literal("hospital"),
 	v.literal("payment"),
+	v.literal("CTV"),
 	v.literal("Salesman"),
 	v.literal("Manager"),
 );
@@ -19,6 +20,7 @@ const discountTypeLabels = {
 	Doctor: "Chiet khau BS",
 	hospital: "Chiet khau NT, KD",
 	payment: "Chiet khau thanh toan",
+	CTV: "Chiet khau CTV",
 	Salesman: "Chiet khau NT, KD",
 	Manager: "Chiet khau Quan ly",
 } as const;
@@ -27,6 +29,7 @@ const discountTypeToField = {
 	Doctor: "doctorDiscount",
 	hospital: "salesDiscount",
 	payment: "paymentDiscount",
+	CTV: "ctvDiscount",
 	Salesman: "salesDiscount",
 	Manager: "managerDiscount",
 } as const;
@@ -35,6 +38,7 @@ const fieldToDiscountType = {
 	doctorDiscount: "Doctor",
 	salesDiscount: "hospital",
 	paymentDiscount: "payment",
+	ctvDiscount: "CTV",
 	managerDiscount: "Manager",
 } as const;
 
@@ -42,6 +46,7 @@ const fieldLabels = {
 	doctorDiscount: "Chiet khau BS",
 	salesDiscount: "Chiet khau NT, KD",
 	paymentDiscount: "Chiet khau thanh toan",
+	ctvDiscount: "Chiet khau CTV",
 	managerDiscount: "Chiet khau Quan ly",
 } as const;
 
@@ -49,6 +54,7 @@ const importDiscountTypeCodeMap = {
 	DOCTOR: "Doctor",
 	HOSPITAL: "hospital",
 	PAYMENT: "payment",
+	CTV: "CTV",
 	SALESMAN: "Salesman",
 	MANAGER: "Manager",
 } as const;
@@ -153,6 +159,7 @@ function getConfiguredDiscounts(rule: {
 	doctorDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
 	salesDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
 	paymentDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
+	ctvDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
 	managerDiscount?: { salesmanId: Id<"salesmen">; discountPercent: number };
 	discountType?: DiscountTypeValue;
 	salesmanId?: Id<"salesmen">;
@@ -197,10 +204,14 @@ function hasMatchingSalesman(
 	rule: Parameters<typeof getConfiguredDiscounts>[0],
 	salesmanId: Id<"salesmen">,
 ) {
-	return getConfiguredDiscounts(rule).some((detail) => detail.salesmanId === salesmanId);
+	return getConfiguredDiscounts(rule).some(
+		(detail) => detail.salesmanId === salesmanId,
+	);
 }
 
-function getTotalDiscountPercent(rule: Parameters<typeof getConfiguredDiscounts>[0]) {
+function getTotalDiscountPercent(
+	rule: Parameters<typeof getConfiguredDiscounts>[0],
+) {
 	return clampPercent(
 		getConfiguredDiscounts(rule).reduce(
 			(total, detail) => total + detail.discountPercent,
@@ -218,7 +229,10 @@ async function formatDiscountDetailValue(
 		return undefined;
 	}
 
-	const detail = value as { salesmanId?: Id<"salesmen">; discountPercent?: number };
+	const detail = value as {
+		salesmanId?: Id<"salesmen">;
+		discountPercent?: number;
+	};
 	if (!detail.salesmanId || typeof detail.discountPercent !== "number") {
 		return undefined;
 	}
@@ -237,7 +251,11 @@ async function formatHistoryValue(
 	}
 
 	if ((Object.keys(fieldLabels) as string[]).includes(field)) {
-		return await formatDiscountDetailValue(ctx, field as DiscountFieldName, value);
+		return await formatDiscountDetailValue(
+			ctx,
+			field as DiscountFieldName,
+			value,
+		);
 	}
 
 	switch (field) {
@@ -309,8 +327,12 @@ export const listWithDetails = query({
 
 		const result = await Promise.all(
 			rules.map(async (rule) => {
-				const customer = rule.customerId ? await ctx.db.get(rule.customerId) : null;
-				const product = rule.productId ? await ctx.db.get(rule.productId) : null;
+				const customer = rule.customerId
+					? await ctx.db.get(rule.customerId)
+					: null;
+				const product = rule.productId
+					? await ctx.db.get(rule.productId)
+					: null;
 				const configuredDiscounts = getConfiguredDiscounts(rule);
 
 				return await Promise.all(
@@ -356,7 +378,9 @@ export const create = mutation({
 		const ruleGroupId = args.ruleGroupId?.trim() || undefined;
 		const notes = args.notes?.trim() ? args.notes.trim() : undefined;
 		const unitPrice =
-			typeof args.unitPrice === "number" ? clampAmount(args.unitPrice) : undefined;
+			typeof args.unitPrice === "number"
+				? clampAmount(args.unitPrice)
+				: undefined;
 
 		if (ruleGroupId) {
 			const existing = await ctx.db
@@ -412,6 +436,7 @@ export const update = mutation({
 		doctorDiscount: v.optional(v.union(discountDetailValidator, v.null())),
 		salesDiscount: v.optional(v.union(discountDetailValidator, v.null())),
 		paymentDiscount: v.optional(v.union(discountDetailValidator, v.null())),
+		ctvDiscount: v.optional(v.union(discountDetailValidator, v.null())),
 		managerDiscount: v.optional(v.union(discountDetailValidator, v.null())),
 	},
 	handler: async (ctx, args) => {
@@ -422,9 +447,13 @@ export const update = mutation({
 		const now = Date.now();
 		const nextName = args.name ?? existing.name;
 		const nextCustomerId =
-			args.customerId === undefined ? existing.customerId : (args.customerId ?? undefined);
+			args.customerId === undefined
+				? existing.customerId
+				: (args.customerId ?? undefined);
 		const nextProductId =
-			args.productId === undefined ? existing.productId : (args.productId ?? undefined);
+			args.productId === undefined
+				? existing.productId
+				: (args.productId ?? undefined);
 		const nextUnitPrice =
 			args.unitPrice === undefined
 				? existing.unitPrice
@@ -433,13 +462,19 @@ export const update = mutation({
 					: clampAmount(args.unitPrice);
 		const nextCreatedByStaff = args.createdByStaff ?? existing.createdByStaff;
 		const nextNotes =
-			args.notes === undefined ? existing.notes : args.notes?.trim() ? args.notes.trim() : undefined;
-		const nextIsActive = typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
+			args.notes === undefined
+				? existing.notes
+				: args.notes?.trim()
+					? args.notes.trim()
+					: undefined;
+		const nextIsActive =
+			typeof args.isActive === "boolean" ? args.isActive : existing.isActive;
 
 		const existingDetails = {
 			doctorDiscount: existing.doctorDiscount,
 			salesDiscount: existing.salesDiscount,
 			paymentDiscount: existing.paymentDiscount,
+			ctvDiscount: existing.ctvDiscount,
 			managerDiscount: existing.managerDiscount,
 		};
 		const nextDetails = {
@@ -449,40 +484,61 @@ export const update = mutation({
 					: args.doctorDiscount === null
 						? undefined
 						: {
-							salesmanId: args.doctorDiscount.salesmanId,
-							discountPercent: clampPercent(args.doctorDiscount.discountPercent),
-						},
+								salesmanId: args.doctorDiscount.salesmanId,
+								discountPercent: clampPercent(
+									args.doctorDiscount.discountPercent,
+								),
+							},
 			salesDiscount:
 				args.salesDiscount === undefined
 					? existing.salesDiscount
 					: args.salesDiscount === null
 						? undefined
 						: {
-							salesmanId: args.salesDiscount.salesmanId,
-							discountPercent: clampPercent(args.salesDiscount.discountPercent),
-						},
+								salesmanId: args.salesDiscount.salesmanId,
+								discountPercent: clampPercent(
+									args.salesDiscount.discountPercent,
+								),
+							},
 			paymentDiscount:
 				args.paymentDiscount === undefined
 					? existing.paymentDiscount
 					: args.paymentDiscount === null
 						? undefined
 						: {
-							salesmanId: args.paymentDiscount.salesmanId,
-							discountPercent: clampPercent(args.paymentDiscount.discountPercent),
-						},
+								salesmanId: args.paymentDiscount.salesmanId,
+								discountPercent: clampPercent(
+									args.paymentDiscount.discountPercent,
+								),
+							},
+			ctvDiscount:
+				args.ctvDiscount === undefined
+					? existing.ctvDiscount
+					: args.ctvDiscount === null
+						? undefined
+						: {
+								salesmanId: args.ctvDiscount.salesmanId,
+								discountPercent: clampPercent(args.ctvDiscount.discountPercent),
+							},
 			managerDiscount:
 				args.managerDiscount === undefined
 					? existing.managerDiscount
 					: args.managerDiscount === null
 						? undefined
 						: {
-							salesmanId: args.managerDiscount.salesmanId,
-							discountPercent: clampPercent(args.managerDiscount.discountPercent),
-						},
+								salesmanId: args.managerDiscount.salesmanId,
+								discountPercent: clampPercent(
+									args.managerDiscount.discountPercent,
+								),
+							},
 		};
 
 		const changes: Array<{ field: string; from?: string; to?: string }> = [];
-		const pushChange = async (field: string, previous: unknown, next: unknown) => {
+		const pushChange = async (
+			field: string,
+			previous: unknown,
+			next: unknown,
+		) => {
 			if (JSON.stringify(previous) === JSON.stringify(next)) return;
 			changes.push({
 				field,
@@ -495,13 +551,38 @@ export const update = mutation({
 		await pushChange("customerId", existing.customerId, nextCustomerId);
 		await pushChange("productId", existing.productId, nextProductId);
 		await pushChange("unitPrice", existing.unitPrice, nextUnitPrice);
-		await pushChange("createdByStaff", existing.createdByStaff, nextCreatedByStaff);
+		await pushChange(
+			"createdByStaff",
+			existing.createdByStaff,
+			nextCreatedByStaff,
+		);
 		await pushChange("notes", existing.notes, nextNotes);
 		await pushChange("isActive", existing.isActive, nextIsActive);
-		await pushChange("doctorDiscount", existingDetails.doctorDiscount, nextDetails.doctorDiscount);
-		await pushChange("salesDiscount", existingDetails.salesDiscount, nextDetails.salesDiscount);
-		await pushChange("paymentDiscount", existingDetails.paymentDiscount, nextDetails.paymentDiscount);
-		await pushChange("managerDiscount", existingDetails.managerDiscount, nextDetails.managerDiscount);
+		await pushChange(
+			"doctorDiscount",
+			existingDetails.doctorDiscount,
+			nextDetails.doctorDiscount,
+		);
+		await pushChange(
+			"salesDiscount",
+			existingDetails.salesDiscount,
+			nextDetails.salesDiscount,
+		);
+		await pushChange(
+			"paymentDiscount",
+			existingDetails.paymentDiscount,
+			nextDetails.paymentDiscount,
+		);
+		await pushChange(
+			"ctvDiscount",
+			existingDetails.ctvDiscount,
+			nextDetails.ctvDiscount,
+		);
+		await pushChange(
+			"managerDiscount",
+			existingDetails.managerDiscount,
+			nextDetails.managerDiscount,
+		);
 
 		const patch: Partial<typeof existing> & Record<string, unknown> = {
 			name: nextName,
@@ -514,6 +595,7 @@ export const update = mutation({
 			doctorDiscount: nextDetails.doctorDiscount,
 			salesDiscount: nextDetails.salesDiscount,
 			paymentDiscount: nextDetails.paymentDiscount,
+			ctvDiscount: nextDetails.ctvDiscount,
 			managerDiscount: nextDetails.managerDiscount,
 			updatedAt: now,
 		};
@@ -586,21 +668,35 @@ export const importMany = mutation({
 			ctx.db.query("salesmen").collect(),
 		]);
 
-		const customerByCode = new Map(customers.map((item) => [normalizeLookupCode(item.code), item]));
-		const productBySku = new Map(products.map((item) => [normalizeLookupCode(item.sku), item]));
-		const salesmanByCode = new Map(salesmen.map((item) => [normalizeLookupCode(item.code), item]));
+		const customerByCode = new Map(
+			customers.map((item) => [normalizeLookupCode(item.code), item]),
+		);
+		const productBySku = new Map(
+			products.map((item) => [normalizeLookupCode(item.sku), item]),
+		);
+		const salesmanByCode = new Map(
+			salesmen.map((item) => [normalizeLookupCode(item.code), item]),
+		);
 
 		const errors: string[] = [];
-		const preparedRows = new Map<string, {
-			name: string;
-			customerId?: Id<"customers">;
-			productId?: Id<"products">;
-			unitPrice?: number;
-			createdByStaff: string;
-			notes?: string;
-			isActive: boolean;
-			details: Partial<Record<DiscountFieldName, { salesmanId: Id<"salesmen">; discountPercent: number }>>;
-		}>();
+		const preparedRows = new Map<
+			string,
+			{
+				name: string;
+				customerId?: Id<"customers">;
+				productId?: Id<"products">;
+				unitPrice?: number;
+				createdByStaff: string;
+				notes?: string;
+				isActive: boolean;
+				details: Partial<
+					Record<
+						DiscountFieldName,
+						{ salesmanId: Id<"salesmen">; discountPercent: number }
+					>
+				>;
+			}
+		>();
 
 		for (const [index, row] of args.rows.entries()) {
 			const rowNumber = index + 2;
@@ -609,9 +705,14 @@ export const importMany = mutation({
 				if (!ruleName) throw new Error("Ten quy tac khong duoc de trong");
 
 				const discountTypeCode = normalizeLookupCode(row.discountTypeCode);
-				const mappedDiscountType = importDiscountTypeCodeMap[discountTypeCode as keyof typeof importDiscountTypeCodeMap];
+				const mappedDiscountType =
+					importDiscountTypeCodeMap[
+						discountTypeCode as keyof typeof importDiscountTypeCodeMap
+					];
 				if (!mappedDiscountType) {
-					throw new Error(`Ma loai chiet khau khong hop le: ${row.discountTypeCode}`);
+					throw new Error(
+						`Ma loai chiet khau khong hop le: ${row.discountTypeCode}`,
+					);
 				}
 				const field = discountTypeToField[mappedDiscountType];
 
@@ -624,11 +725,15 @@ export const importMany = mutation({
 					throw new Error("San pham phai dung SKU, khong import theo ten");
 				}
 
-				const customer = customerCode ? customerByCode.get(normalizeLookupCode(customerCode)) : undefined;
+				const customer = customerCode
+					? customerByCode.get(normalizeLookupCode(customerCode))
+					: undefined;
 				if (customerCode && !customer) {
 					throw new Error(`Khong tim thay khach hang theo ma: ${customerCode}`);
 				}
-				const product = productSku ? productBySku.get(normalizeLookupCode(productSku)) : undefined;
+				const product = productSku
+					? productBySku.get(normalizeLookupCode(productSku))
+					: undefined;
 				if (productSku && !product) {
 					throw new Error(`Khong tim thay san pham theo SKU: ${productSku}`);
 				}
@@ -640,13 +745,18 @@ export const importMany = mutation({
 					throw new Error(`Khong tim thay nguoi nhan theo ma: ${salesmanCode}`);
 				}
 
-				const discountPercent = parseImportNumber(row.discountPercent, "Ty le chiet khau");
+				const discountPercent = parseImportNumber(
+					row.discountPercent,
+					"Ty le chiet khau",
+				);
 				if (discountPercent < 0 || discountPercent > 100) {
 					throw new Error("Ty le chiet khau phai nam trong khoang 0-100");
 				}
 
 				const unitPriceRaw = row.unitPrice?.trim() ?? "";
-				const unitPrice = unitPriceRaw ? parseImportNumber(unitPriceRaw, "Don gia") : undefined;
+				const unitPrice = unitPriceRaw
+					? parseImportNumber(unitPriceRaw, "Don gia")
+					: undefined;
 				if (typeof unitPrice === "number" && unitPrice < 0) {
 					throw new Error("Don gia khong duoc am");
 				}
@@ -678,7 +788,9 @@ export const importMany = mutation({
 				};
 
 				if (existingGroup.details[field]) {
-					throw new Error(`Trung loai chiet khau ${discountTypeLabels[mappedDiscountType]} trong cung mot quy tac`);
+					throw new Error(
+						`Trung loai chiet khau ${discountTypeLabels[mappedDiscountType]} trong cung mot quy tac`,
+					);
 				}
 
 				existingGroup.details[field] = {
@@ -687,7 +799,9 @@ export const importMany = mutation({
 				};
 				preparedRows.set(groupingKey, existingGroup);
 			} catch (error) {
-				errors.push(`Dong ${rowNumber}: ${error instanceof Error ? error.message : "Loi du lieu"}`);
+				errors.push(
+					`Dong ${rowNumber}: ${error instanceof Error ? error.message : "Loi du lieu"}`,
+				);
 			}
 		}
 
@@ -711,6 +825,7 @@ export const importMany = mutation({
 				doctorDiscount: prepared.details.doctorDiscount,
 				salesDiscount: prepared.details.salesDiscount,
 				paymentDiscount: prepared.details.paymentDiscount,
+				ctvDiscount: prepared.details.ctvDiscount,
 				managerDiscount: prepared.details.managerDiscount,
 				isActive: prepared.isActive,
 				createdAt: now,
@@ -735,7 +850,18 @@ export const getApplicableForOrder = query({
 	},
 	handler: async (ctx, args) => {
 		if (args.productIds.length === 0) {
-			return {} as Record<string, { totalPercent: number; rules: { id: string; name: string; discountType: string; discountPercent: number }[] }>;
+			return {} as Record<
+				string,
+				{
+					totalPercent: number;
+					rules: {
+						id: string;
+						name: string;
+						discountType: string;
+						discountPercent: number;
+					}[];
+				}
+			>;
 		}
 
 		const rules = await ctx.db
@@ -743,11 +869,23 @@ export const getApplicableForOrder = query({
 			.withIndex("by_active", (q) => q.eq("isActive", true))
 			.collect();
 
-		const byProduct: Record<string, { totalPercent: number; rules: { id: string; name: string; discountType: string; discountPercent: number }[] }> = {};
+		const byProduct: Record<
+			string,
+			{
+				totalPercent: number;
+				rules: {
+					id: string;
+					name: string;
+					discountType: string;
+					discountPercent: number;
+				}[];
+			}
+		> = {};
 
 		for (const productId of args.productIds) {
 			const matched = rules.filter((rule) => {
-				const customerMatch = !rule.customerId || rule.customerId === args.customerId;
+				const customerMatch =
+					!rule.customerId || rule.customerId === args.customerId;
 				const productMatch = !rule.productId || rule.productId === productId;
 				return customerMatch && productMatch;
 			});

@@ -22,6 +22,7 @@ function getDiscountEntries(rule: {
 	doctorDiscount?: { discountPercent: number };
 	salesDiscount?: { discountPercent: number };
 	paymentDiscount?: { discountPercent: number };
+	ctvDiscount?: { discountPercent: number };
 	managerDiscount?: { discountPercent: number };
 	discountPercent?: number;
 }) {
@@ -29,6 +30,7 @@ function getDiscountEntries(rule: {
 		rule.doctorDiscount?.discountPercent,
 		rule.salesDiscount?.discountPercent,
 		rule.paymentDiscount?.discountPercent,
+		rule.ctvDiscount?.discountPercent,
 		rule.managerDiscount?.discountPercent,
 	].filter((value): value is number => typeof value === "number");
 
@@ -40,6 +42,7 @@ function getAppliedDiscountTypes(rule: {
 	doctorDiscount?: { discountPercent: number };
 	salesDiscount?: { discountPercent: number };
 	paymentDiscount?: { discountPercent: number };
+	ctvDiscount?: { discountPercent: number };
 	managerDiscount?: { discountPercent: number };
 	discountType?: string;
 }) {
@@ -47,6 +50,7 @@ function getAppliedDiscountTypes(rule: {
 	if (rule.doctorDiscount) types.push("Doctor");
 	if (rule.salesDiscount) types.push("hospital");
 	if (rule.paymentDiscount) types.push("payment");
+	if (rule.ctvDiscount) types.push("CTV");
 	if (rule.managerDiscount) types.push("Manager");
 	if (types.length > 0) return types;
 	return rule.discountType ? [rule.discountType] : [];
@@ -143,7 +147,6 @@ export const getStatusLogs = query({
 	},
 });
 
-
 // List with customer details
 export const listWithCustomers = query({
 	args: {},
@@ -198,7 +201,11 @@ export const create = mutation({
 				100,
 				matched.reduce(
 					(sum, rule) =>
-						sum + getDiscountEntries(rule).reduce((total, percent) => total + percent, 0),
+						sum +
+						getDiscountEntries(rule).reduce(
+							(total, percent) => total + percent,
+							0,
+						),
 					0,
 				),
 			);
@@ -218,7 +225,9 @@ export const create = mutation({
 				unitPrice: discountedUnitPrice,
 				discountPercent,
 				discountAmount,
-				appliedDiscountTypes: matched.flatMap((rule) => getAppliedDiscountTypes(rule)),
+				appliedDiscountTypes: matched.flatMap((rule) =>
+					getAppliedDiscountTypes(rule),
+				),
 			};
 		});
 
@@ -305,7 +314,6 @@ export const updateStatus = mutation({
 		return await ctx.db.get(args.id);
 	},
 });
-
 
 // Fulfill items from sales order (reduces inventory)
 export const fulfillItems = mutation({

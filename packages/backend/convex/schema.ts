@@ -109,6 +109,12 @@ export default defineSchema({
 				discountPercent: v.number(),
 			}),
 		),
+		ctvDiscount: v.optional(
+			v.object({
+				salesmanId: v.id("salesmen"),
+				discountPercent: v.number(),
+			}),
+		),
 		managerDiscount: v.optional(
 			v.object({
 				salesmanId: v.id("salesmen"),
@@ -121,6 +127,7 @@ export default defineSchema({
 				v.literal("Doctor"),
 				v.literal("hospital"),
 				v.literal("payment"),
+				v.literal("CTV"),
 				v.literal("Salesman"),
 				v.literal("Manager"),
 			),

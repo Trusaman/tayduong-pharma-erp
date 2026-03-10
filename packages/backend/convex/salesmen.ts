@@ -97,6 +97,7 @@ export const remove = mutation({
 				discount.doctorDiscount?.salesmanId,
 				discount.salesDiscount?.salesmanId,
 				discount.paymentDiscount?.salesmanId,
+				discount.ctvDiscount?.salesmanId,
 				discount.managerDiscount?.salesmanId,
 				discount.salesmanId,
 			].includes(args.id);

@@ -63,6 +63,7 @@ const discountTypes = [
 	"Doctor",
 	"hospital",
 	"payment",
+	"CTV",
 	"Salesman",
 	"Manager",
 ] as const;
@@ -71,11 +72,12 @@ const discountTypeLabels: Record<(typeof discountTypes)[number], string> = {
 	Doctor: "Chiết khấu BS",
 	hospital: "Chiết khấu NT, KD",
 	payment: "Chiết khấu thanh toán",
+	CTV: "Chiết khấu CTV",
 	Salesman: "Chiết khấu NT, KD",
 	Manager: "Chiết khấu Quản lý",
 };
 
-type DiscountGroupKey = "doctor" | "sales" | "payment" | "manager";
+type DiscountGroupKey = "doctor" | "sales" | "payment" | "ctv" | "manager";
 type DiscountGroupFormState = { salesmanId: string; percent: string };
 type DiscountFormState = {
 	name: string;
@@ -87,6 +89,7 @@ type DiscountFormState = {
 	doctor: DiscountGroupFormState;
 	sales: DiscountGroupFormState;
 	payment: DiscountGroupFormState;
+	ctv: DiscountGroupFormState;
 	manager: DiscountGroupFormState;
 };
 type EditDiscountFormState = DiscountFormState & {
@@ -97,6 +100,7 @@ const discountGroups: Array<{ key: DiscountGroupKey; label: string }> = [
 	{ key: "doctor", label: "Chiết khấu BS" },
 	{ key: "sales", label: "Chiết khấu NT, KD" },
 	{ key: "payment", label: "Chiết khấu thanh toán" },
+	{ key: "ctv", label: "Chiết khấu CTV" },
 	{ key: "manager", label: "Chiết khấu Quản lý" },
 ];
 
@@ -107,6 +111,7 @@ const discountTypeToGroup: Record<
 	Doctor: "doctor",
 	hospital: "sales",
 	payment: "payment",
+	CTV: "ctv",
 	Salesman: "sales",
 	Manager: "manager",
 };
@@ -118,6 +123,7 @@ const groupToDiscountType: Record<
 	doctor: "Doctor",
 	sales: "hospital",
 	payment: "payment",
+	ctv: "CTV",
 	manager: "Manager",
 };
 
@@ -162,6 +168,7 @@ const discountTypeCodeByValue: Record<(typeof discountTypes)[number], string> =
 		Doctor: "DOCTOR",
 		hospital: "HOSPITAL",
 		payment: "PAYMENT",
+		CTV: "CTV",
 		Salesman: "SALESMAN",
 		Manager: "MANAGER",
 	};
@@ -193,6 +200,7 @@ const createEmptyDiscountForm = (): DiscountFormState => ({
 	doctor: { salesmanId: "", percent: "" },
 	sales: { salesmanId: "", percent: "" },
 	payment: { salesmanId: "", percent: "" },
+	ctv: { salesmanId: "", percent: "" },
 	manager: { salesmanId: "", percent: "" },
 });
 
@@ -535,8 +543,12 @@ function DiscountsPage() {
 				discountGroups[2].label,
 				editForm.payment,
 			);
-			const managerDiscount = toDiscountDetail(
+			const ctvDiscount = toDiscountDetail(
 				discountGroups[3].label,
+				editForm.ctv,
+			);
+			const managerDiscount = toDiscountDetail(
+				discountGroups[4].label,
 				editForm.manager,
 			);
 
@@ -544,6 +556,7 @@ function DiscountsPage() {
 				!doctorDiscount &&
 				!salesDiscount &&
 				!paymentDiscount &&
+				!ctvDiscount &&
 				!managerDiscount
 			) {
 				toast.error("Vui lòng nhập ít nhất một loại chiết khấu");
@@ -566,6 +579,7 @@ function DiscountsPage() {
 				doctorDiscount,
 				salesDiscount,
 				paymentDiscount,
+				ctvDiscount,
 				managerDiscount,
 			});
 
@@ -895,7 +909,7 @@ function DiscountsPage() {
 				["3) Mã khách hàng và SKU thuốc để trống nghĩa là áp dụng toàn cục."],
 				["4) Mã người nhận là bắt buộc."],
 				[
-					"5) discount type code hợp lệ: DOCTOR, HOSPITAL, PAYMENT, SALESMAN, MANAGER.",
+					"5) discount type code hợp lệ: DOCTOR, HOSPITAL, PAYMENT, CTV, SALESMAN, MANAGER.",
 				],
 				[
 					"6) HOSPITAL và SALESMAN đều hiển thị tại nhóm Chiết khấu NT, KD trên giao diện.",
@@ -1083,6 +1097,7 @@ function DiscountsPage() {
 			doctor: getGroupState("doctor"),
 			sales: getGroupState("sales"),
 			payment: getGroupState("payment"),
+			ctv: getGroupState("ctv"),
 			manager: getGroupState("manager"),
 		});
 		setEditDialogOpen(true);
