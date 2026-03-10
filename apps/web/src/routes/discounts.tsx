@@ -25,6 +25,7 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -77,6 +78,21 @@ const discountTypeLabels: Record<(typeof discountTypes)[number], string> = {
 	Manager: "Chiết khấu Quản lý",
 };
 
+const historyFieldLabels: Record<string, string> = {
+	name: "Tên quy tắc",
+	customerId: "Khách hàng",
+	productId: "Sản phẩm/Thuốc",
+	unitPrice: "Đơn giá",
+	createdByStaff: "Người tạo",
+	notes: "Ghi chú",
+	isActive: "Trạng thái",
+	doctorDiscount: "Chiết khấu BS",
+	salesDiscount: "Chiết khấu NT, KD",
+	paymentDiscount: "Chiết khấu thanh toán",
+	ctvDiscount: "Chiết khấu CTV",
+	managerDiscount: "Chiết khấu Quản lý",
+};
+
 type DiscountGroupKey = "doctor" | "sales" | "payment" | "ctv" | "manager";
 type DiscountGroupFormState = { salesmanId: string; percent: string };
 type DiscountFormState = {
@@ -94,6 +110,17 @@ type DiscountFormState = {
 };
 type EditDiscountFormState = DiscountFormState & {
 	updatedByStaff: string;
+};
+
+type DiscountHistorySnapshot = {
+	name: string;
+	updatedAt: number;
+	totalDiscountPercent: number;
+	entries: Array<{
+		editedAt: number;
+		editedBy: string;
+		changes: Array<{ field: string; from?: string; to?: string }>;
+	}>;
 };
 
 const discountGroups: Array<{ key: DiscountGroupKey; label: string }> = [
@@ -213,10 +240,13 @@ function DiscountsPage() {
 	const [salesmanDialogOpen, setSalesmanDialogOpen] = useState(false);
 	const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
 	const [editDialogOpen, setEditDialogOpen] = useState(false);
+	const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 	const [editingRuleId, setEditingRuleId] =
 		useState<Id<"discountRules"> | null>(null);
 	const [editingRuleName, setEditingRuleName] = useState("");
+	const [historySnapshot, setHistorySnapshot] =
+		useState<DiscountHistorySnapshot | null>(null);
 	const [search, setSearch] = useState("");
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
 	const [pendingRemovedRuleIds, setPendingRemovedRuleIds] = useState<string[]>(
@@ -303,6 +333,8 @@ function DiscountsPage() {
 
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
+	const formatDateTime = (timestamp: number) =>
+		new Date(timestamp).toLocaleString("vi-VN");
 	const formatDecimalNumber = (value: number) =>
 		new Intl.NumberFormat("vi-VN", {
 			minimumFractionDigits: 0,
@@ -379,12 +411,36 @@ function DiscountsPage() {
 
 	const parseDecimalInput = (value: string): number | undefined =>
 		parseLocalizedNumber(value);
+	const getHistoryFieldLabel = (field: string) =>
+		historyFieldLabels[field] ?? field;
+	const isHistoryValueEmpty = (value?: string) =>
+		value === undefined || value === null || value === "";
+	const getHistoryFieldBadgeVariant = (field: string) => {
+		if (field.endsWith("Discount")) return "default" as const;
+		if (field === "isActive") return "secondary" as const;
+		if (field === "unitPrice") return "outline" as const;
+		return "ghost" as const;
+	};
+	const getHistoryChangeKind = (from?: string, to?: string) => {
+		if (isHistoryValueEmpty(from) && !isHistoryValueEmpty(to)) {
+			return { label: "Thêm mới", variant: "secondary" as const };
+		}
+		if (!isHistoryValueEmpty(from) && isHistoryValueEmpty(to)) {
+			return { label: "Xóa giá trị", variant: "destructive" as const };
+		}
+		return { label: "Cập nhật", variant: "outline" as const };
+	};
 
 	const closeEditDialog = () => {
 		setEditDialogOpen(false);
 		setEditingRuleId(null);
 		setEditingRuleName("");
 		setEditForm(createEmptyEditForm());
+	};
+
+	const closeHistoryDialog = () => {
+		setHistoryDialogOpen(false);
+		setHistorySnapshot(null);
 	};
 
 	const handleCreateSalesman = async (e: React.FormEvent) => {
@@ -664,6 +720,35 @@ function DiscountsPage() {
 			})
 			.sort((left, right) => right.createdAt - left.createdAt);
 	})();
+
+	type DiscountEditHistoryEntry = NonNullable<
+		DiscountRuleRow["editHistory"]
+	>[number];
+	const getRuleGroupEditHistory = (
+		ruleGroup: DiscountRuleGroupRow,
+	): DiscountEditHistoryEntry[] => {
+		const seen = new Set<string>();
+
+		return ruleGroup.groupRules
+			.flatMap((rule) => rule.editHistory ?? [])
+			.filter((entry) => {
+				const key = `${entry.editedAt}-${entry.editedBy}-${JSON.stringify(entry.changes)}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			})
+			.sort((left, right) => right.editedAt - left.editedAt);
+	};
+
+	const openHistoryDialog = (ruleGroup: DiscountRuleGroupRow) => {
+		setHistorySnapshot({
+			name: ruleGroup.name,
+			updatedAt: ruleGroup.updatedAt,
+			totalDiscountPercent: ruleGroup.totalDiscountPercent,
+			entries: getRuleGroupEditHistory(ruleGroup),
+		});
+		setHistoryDialogOpen(true);
+	};
 
 	const visibleRuleIds = (filteredRuleGroups ?? []).map((group) => group.id);
 	const visibleRuleIdsKey = visibleRuleIds.join("||");
@@ -1705,6 +1790,132 @@ function DiscountsPage() {
 				</DialogContent>
 			</Dialog>
 
+			<Dialog
+				open={historyDialogOpen}
+				onOpenChange={(open) => !open && closeHistoryDialog()}
+			>
+				<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
+					<DialogHeader>
+						<DialogTitle>Lịch sử thay đổi chiết khấu</DialogTitle>
+						<DialogDescription>
+							{historySnapshot ? (
+								<>
+									Theo dõi các lần chỉnh sửa của quy tắc{" "}
+									<strong>{historySnapshot.name}</strong>.
+								</>
+							) : (
+								"Không tìm thấy nhóm chiết khấu cần xem lịch sử."
+							)}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-4 py-4">
+						{historySnapshot ? (
+							<>
+								<div className="rounded-lg border p-4 text-sm">
+									<div className="font-medium">Thông tin hiện tại</div>
+									<div className="mt-2 text-muted-foreground text-xs">
+										Cập nhật gần nhất:{" "}
+										{formatDateTime(historySnapshot.updatedAt)}
+									</div>
+									<div className="mt-2 text-muted-foreground text-xs">
+										Tổng chiết khấu hiện tại:{" "}
+										{formatPercentValue(historySnapshot.totalDiscountPercent)}
+									</div>
+								</div>
+
+								{historySnapshot.entries.length > 0 ? (
+									<div className="space-y-3">
+										{historySnapshot.entries.map((entry, entryIndex) => (
+											<div
+												key={`${entry.editedAt}-${entry.editedBy}-${entryIndex}`}
+												className="rounded-lg border bg-card p-4 shadow-sm"
+											>
+												<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+													<div className="flex items-center gap-2">
+														<Badge variant="secondary">Người sửa</Badge>
+														<div className="font-medium text-sm">
+															{entry.editedBy}
+														</div>
+													</div>
+													<div className="text-muted-foreground text-xs">
+														{formatDateTime(entry.editedAt)}
+													</div>
+												</div>
+												<div className="mt-3 space-y-3">
+													{entry.changes.length > 0 ? (
+														entry.changes.map((change, changeIndex) => {
+															const changeKind = getHistoryChangeKind(
+																change.from,
+																change.to,
+															);
+
+															return (
+																<div
+																	key={`${change.field}-${changeIndex}`}
+																	className="rounded-md border bg-muted/30 p-3 text-sm"
+																>
+																	<div className="flex flex-wrap items-center gap-2">
+																		<Badge
+																			variant={getHistoryFieldBadgeVariant(
+																				change.field,
+																			)}
+																		>
+																			{getHistoryFieldLabel(change.field)}
+																		</Badge>
+																		<Badge variant={changeKind.variant}>
+																			{changeKind.label}
+																		</Badge>
+																	</div>
+																	<div className="mt-3 grid gap-2 sm:grid-cols-2">
+																		<div className="rounded-md border border-muted-foreground/30 border-dashed bg-background p-3">
+																			<div className="text-[11px] text-muted-foreground uppercase tracking-wide">
+																				Từ
+																			</div>
+																			<div className="mt-1 break-words text-xs">
+																				{change.from ?? "(trống)"}
+																			</div>
+																		</div>
+																		<div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+																			<div className="text-[11px] text-primary uppercase tracking-wide">
+																				Thành
+																			</div>
+																			<div className="mt-1 break-words text-xs">
+																				{change.to ?? "(trống)"}
+																			</div>
+																		</div>
+																	</div>
+																</div>
+															);
+														})
+													) : (
+														<div className="text-muted-foreground text-sm">
+															Không có chi tiết thay đổi.
+														</div>
+													)}
+												</div>
+											</div>
+										))}
+									</div>
+								) : (
+									<div className="rounded-lg border border-dashed p-4 text-muted-foreground text-sm">
+										Quy tắc này chưa có lịch sử chỉnh sửa.
+									</div>
+								)}
+							</>
+						) : null}
+					</div>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={closeHistoryDialog}
+						>
+							Đóng
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
 			<Card>
 				<CardHeader>
 					<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1910,9 +2121,9 @@ function DiscountsPage() {
 															<Button
 																size="sm"
 																variant="outline"
-																onClick={() => startEditingGroup(ruleGroup)}
+																onClick={() => openHistoryDialog(ruleGroup)}
 															>
-																Chi tiết
+																Lịch sử sửa
 															</Button>
 															<Button
 																size="sm"
