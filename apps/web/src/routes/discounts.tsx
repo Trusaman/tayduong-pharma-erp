@@ -121,7 +121,6 @@ const groupToDiscountType: Record<
 	manager: "Manager",
 };
 
-
 const discountWorkbookColumns = {
 	ruleName: "Tên quy tắc",
 	discountTypeCode: "Mã loại chiết khấu",
@@ -183,7 +182,6 @@ type DiscountImportRowPayload = {
 	notes?: string;
 	status?: string;
 };
-
 
 const createEmptyDiscountForm = (): DiscountFormState => ({
 	name: "",
@@ -310,26 +308,26 @@ function DiscountsPage() {
 
 		if (activeCount === groupRules.length) {
 			return {
-				label: "Hoat dong",
+				label: "Hoạt động",
 				className: "font-medium text-emerald-600 text-xs",
-				nextActionLabel: "Tam dung",
+				nextActionLabel: "Tạm dừng",
 				nextIsActive: false,
 			};
 		}
 
 		if (activeCount === 0) {
 			return {
-				label: "Tam dung",
+				label: "Tạm dừng",
 				className: "font-medium text-muted-foreground text-xs",
-				nextActionLabel: "Kich hoat",
+				nextActionLabel: "Kích hoạt",
 				nextIsActive: true,
 			};
 		}
 
 		return {
-			label: `Hoat dong ${activeCount}/${groupRules.length}`,
+			label: `Hoạt động ${activeCount}/${groupRules.length}`,
 			className: "font-medium text-amber-600 text-xs",
-			nextActionLabel: "Kich hoat tat ca",
+			nextActionLabel: "Kích hoạt tất cả",
 			nextIsActive: true,
 		};
 	};
@@ -380,7 +378,6 @@ function DiscountsPage() {
 		setEditingRuleName("");
 		setEditForm(createEmptyEditForm());
 	};
-
 
 	const handleCreateSalesman = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -466,7 +463,7 @@ function DiscountsPage() {
 			setDiscountDialogOpen(false);
 			setDiscountForm(createEmptyDiscountForm());
 			toast.success(
-				`Da tao 1 nhom chiet khau voi ${rulesToCreate.length} loai`,
+				`Đã tạo 1 nhóm chiết khấu với ${rulesToCreate.length} loại`,
 			);
 		} catch (error) {
 			toast.error(
@@ -480,19 +477,19 @@ function DiscountsPage() {
 	const handleEditDiscount = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!editingRuleId) {
-			toast.error("Kh??ng t??m th???y quy t???c c???n s???a");
+			toast.error("Không tìm thấy quy tắc cần sửa");
 			return;
 		}
 
 		try {
 			const parsedUnitPrice = parseDecimalInput(editForm.unitPrice);
 			if (editForm.unitPrice.trim() && typeof parsedUnitPrice !== "number") {
-				toast.error("????n gi?? kh??ng h???p l???");
+				toast.error("Đơn giá không hợp lệ");
 				return;
 			}
 
 			if (!editForm.updatedByStaff.trim()) {
-				toast.error("Vui l??ng nh???p ng?????i ch???nh s???a");
+				toast.error("Vui lòng nhập người chỉnh sửa");
 				return;
 			}
 
@@ -509,10 +506,15 @@ function DiscountsPage() {
 
 				const percent = Number(percentText);
 				if (!salesmanId) {
-					throw new Error(`Vui l??ng ch???n ng?????i nh???n cho ${groupLabel}`);
+					throw new Error(`Vui lòng chọn người nhận cho ${groupLabel}`);
 				}
-				if (!percentText || !Number.isFinite(percent) || percent < 0 || percent > 100) {
-					throw new Error(`${groupLabel}: t??? l??? chi???t kh???u ph???i t??? 0 ?????n 100`);
+				if (
+					!percentText ||
+					!Number.isFinite(percent) ||
+					percent < 0 ||
+					percent > 100
+				) {
+					throw new Error(`${groupLabel}: tỷ lệ chiết khấu phải từ 0 đến 100`);
 				}
 
 				return {
@@ -521,21 +523,42 @@ function DiscountsPage() {
 				};
 			};
 
-			const doctorDiscount = toDiscountDetail(discountGroups[0].label, editForm.doctor);
-			const salesDiscount = toDiscountDetail(discountGroups[1].label, editForm.sales);
-			const paymentDiscount = toDiscountDetail(discountGroups[2].label, editForm.payment);
-			const managerDiscount = toDiscountDetail(discountGroups[3].label, editForm.manager);
+			const doctorDiscount = toDiscountDetail(
+				discountGroups[0].label,
+				editForm.doctor,
+			);
+			const salesDiscount = toDiscountDetail(
+				discountGroups[1].label,
+				editForm.sales,
+			);
+			const paymentDiscount = toDiscountDetail(
+				discountGroups[2].label,
+				editForm.payment,
+			);
+			const managerDiscount = toDiscountDetail(
+				discountGroups[3].label,
+				editForm.manager,
+			);
 
-			if (!doctorDiscount && !salesDiscount && !paymentDiscount && !managerDiscount) {
-				toast.error("Vui l??ng nh???p ??t nh???t m???t lo???i chi???t kh???u");
+			if (
+				!doctorDiscount &&
+				!salesDiscount &&
+				!paymentDiscount &&
+				!managerDiscount
+			) {
+				toast.error("Vui lòng nhập ít nhất một loại chiết khấu");
 				return;
 			}
 
 			await updateDiscount({
 				id: editingRuleId,
 				name: editForm.name.trim(),
-				customerId: editForm.customerId ? (editForm.customerId as Id<"customers">) : undefined,
-				productId: editForm.productId ? (editForm.productId as Id<"products">) : undefined,
+				customerId: editForm.customerId
+					? (editForm.customerId as Id<"customers">)
+					: undefined,
+				productId: editForm.productId
+					? (editForm.productId as Id<"products">)
+					: undefined,
 				unitPrice: parsedUnitPrice,
 				createdByStaff: editForm.createdByStaff.trim(),
 				updatedByStaff: editForm.updatedByStaff.trim(),
@@ -547,16 +570,15 @@ function DiscountsPage() {
 			});
 
 			closeEditDialog();
-			toast.success("???? c???p nh???t quy t???c chi???t kh???u");
+			toast.success("Đã cập nhật quy tắc chiết khấu");
 		} catch (error) {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Kh??ng th??? c???p nh???t quy t???c chi???t kh???u",
+					: "Không thể cập nhật quy tắc chiết khấu",
 			);
 		}
 	};
-
 
 	useEffect(() => {
 		if (!rules) return;
@@ -684,12 +706,12 @@ function DiscountsPage() {
 					updateDiscount({ id: rule._id, isActive: status.nextIsActive }),
 				),
 			);
-			toast.success("Da cap nhat trang thai nhom chiet khau");
+			toast.success("Đã cập nhật trạng thái nhóm chiết khấu");
 		} catch (error) {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Khong the cap nhat trang thai nhom chiet khau",
+					: "Không thể cập nhật trạng thái nhóm chiết khấu",
 			);
 		}
 	};
@@ -705,7 +727,7 @@ function DiscountsPage() {
 			await removeManyDiscounts({
 				ids: removingIds as Id<"discountRules">[],
 			});
-			toast.success("Da xoa nhom chiet khau");
+			toast.success("Đã xóa nhóm chiết khấu");
 		} catch (error) {
 			setPendingRemovedRuleIds((prev) =>
 				prev.filter((id) => !removingIds.includes(id)),
@@ -713,7 +735,7 @@ function DiscountsPage() {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Khong the xoa nhom chiet khau",
+					: "Không thể xóa nhóm chiết khấu",
 			);
 		}
 	};
@@ -734,7 +756,7 @@ function DiscountsPage() {
 			await removeManyDiscounts({
 				ids: removingIds as Id<"discountRules">[],
 			});
-			toast.success(`Da xoa ${selectedRuleGroups.length} nhom chiet khau`);
+			toast.success(`Đã xóa ${selectedRuleGroups.length} nhóm chiết khấu`);
 		} catch (error) {
 			setPendingRemovedRuleIds((prev) =>
 				prev.filter((id) => !removingIds.includes(id)),
@@ -743,7 +765,7 @@ function DiscountsPage() {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Khong the xoa danh sach nhom chiet khau",
+					: "Không thể xóa danh sách nhóm chiết khấu",
 			);
 		}
 	};
@@ -1032,7 +1054,9 @@ function DiscountsPage() {
 		}));
 
 	const startEditingGroup = (ruleGroup: DiscountRuleGroupRow) => {
-		const getGroupState = (groupKey: DiscountGroupKey): DiscountGroupFormState => {
+		const getGroupState = (
+			groupKey: DiscountGroupKey,
+		): DiscountGroupFormState => {
 			const groupRule = ruleGroup.rulesByGroup[groupKey];
 			return {
 				salesmanId: groupRule?.salesmanId ?? "",
@@ -1095,7 +1119,6 @@ function DiscountsPage() {
 			productId: value === "all-products" ? "" : value,
 		});
 	};
-
 
 	const updateCreateGroupSalesman = (
 		groupKey: DiscountGroupKey,
@@ -1454,25 +1477,28 @@ function DiscountsPage() {
 				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[720px]">
 					<form onSubmit={handleEditDiscount}>
 						<DialogHeader>
-							<DialogTitle>Ch???nh s???a chi???t kh???u</DialogTitle>
+							<DialogTitle>Chỉnh sửa chiết khấu</DialogTitle>
 							<DialogDescription>
-								C???p nh???t quy t???c <strong>{editingRuleName || "??ang ch???n"}</strong>.
+								Cập nhật quy tắc{" "}
+								<strong>{editingRuleName || "đang chọn"}</strong>.
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
 							<div className="grid grid-cols-2 gap-4">
 								<div className="space-y-2">
-									<Label>T??n quy t???c *</Label>
+									<Label>Tên quy tắc *</Label>
 									<Input
 										value={editForm.name}
-										onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+										onChange={(e) =>
+											setEditForm({ ...editForm, name: e.target.value })
+										}
 										required
 									/>
 								</div>
 							</div>
 							<div className="grid grid-cols-2 gap-4">
 								<div className="space-y-2">
-									<Label>Ng?????i t???o *</Label>
+									<Label>Người tạo *</Label>
 									<Input
 										value={editForm.createdByStaff}
 										onChange={(e) =>
@@ -1485,7 +1511,7 @@ function DiscountsPage() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label>Ng?????i ch???nh s???a *</Label>
+									<Label>Người chỉnh sửa *</Label>
 									<Input
 										value={editForm.updatedByStaff}
 										onChange={(e) =>
@@ -1500,15 +1526,22 @@ function DiscountsPage() {
 							</div>
 							<div className="grid grid-cols-2 gap-4">
 								<div className="space-y-2">
-									<Label>Kh??ch h??ng</Label>
-									<Select value={editForm.customerId || "all-customers"} onValueChange={updateEditFormCustomer}>
+									<Label>Khách hàng</Label>
+									<Select
+										value={editForm.customerId || "all-customers"}
+										onValueChange={updateEditFormCustomer}
+									>
 										<SelectTrigger>
-											<SelectValue placeholder="T???t c??? kh??ch h??ng">
-												{editForm.customerId ? getCustomerDisplayName(editForm.customerId) : "T???t c??? kh??ch h??ng"}
+											<SelectValue placeholder="Tất cả khách hàng">
+												{editForm.customerId
+													? getCustomerDisplayName(editForm.customerId)
+													: "Tất cả khách hàng"}
 											</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="all-customers">T???t c??? kh??ch h??ng</SelectItem>
+											<SelectItem value="all-customers">
+												Tất cả khách hàng
+											</SelectItem>
 											{customers?.map((customer) => (
 												<SelectItem key={customer._id} value={customer._id}>
 													{customer.name}
@@ -1518,15 +1551,22 @@ function DiscountsPage() {
 									</Select>
 								</div>
 								<div className="space-y-2">
-									<Label>S???n ph???m/Thu???c</Label>
-									<Select value={editForm.productId || "all-products"} onValueChange={updateEditFormProduct}>
+									<Label>Sản phẩm/Thuốc</Label>
+									<Select
+										value={editForm.productId || "all-products"}
+										onValueChange={updateEditFormProduct}
+									>
 										<SelectTrigger>
-											<SelectValue placeholder="T???t c??? s???n ph???m">
-												{editForm.productId ? getProductDisplayName(editForm.productId) : "T???t c??? s???n ph???m"}
+											<SelectValue placeholder="Tất cả sản phẩm">
+												{editForm.productId
+													? getProductDisplayName(editForm.productId)
+													: "Tất cả sản phẩm"}
 											</SelectValue>
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value="all-products">T???t c??? s???n ph???m</SelectItem>
+											<SelectItem value="all-products">
+												Tất cả sản phẩm
+											</SelectItem>
 											{products?.map((product) => (
 												<SelectItem key={product._id} value={product._id}>
 													{product.name}
@@ -1537,7 +1577,7 @@ function DiscountsPage() {
 								</div>
 							</div>
 							<div className="space-y-2">
-								<Label>????n gi??</Label>
+								<Label>Đơn giá</Label>
 								<Input
 									value={editForm.unitPrice}
 									onChange={(e) =>
@@ -1551,9 +1591,12 @@ function DiscountsPage() {
 								/>
 							</div>
 							<div className="space-y-4 rounded-lg border p-4">
-								<h4 className="font-medium text-sm">Chi ti???t chi???t kh???u</h4>
+								<h4 className="font-medium text-sm">Chi tiết chiết khấu</h4>
 								{discountGroups.map((group) => (
-									<div key={group.key} className="grid grid-cols-3 items-end gap-4">
+									<div
+										key={group.key}
+										className="grid grid-cols-3 items-end gap-4"
+									>
 										<div className="space-y-2">
 											<Label>{group.label}</Label>
 											<div className="flex items-center gap-2">
@@ -1563,18 +1606,33 @@ function DiscountsPage() {
 													max="100"
 													step="0.01"
 													value={editForm[group.key].percent}
-													onChange={(e) => updateEditGroupField(group.key, "percent", e.target.value)}
+													onChange={(e) =>
+														updateEditGroupField(
+															group.key,
+															"percent",
+															e.target.value,
+														)
+													}
 													className="w-24"
 												/>
 												<span className="text-muted-foreground text-sm">%</span>
 											</div>
 										</div>
 										<div className="space-y-2">
-											<Label>Ng?????i nh???n</Label>
-											<Select value={editForm[group.key].salesmanId} onValueChange={(value) => updateEditGroupSalesman(group.key, value)}>
+											<Label>Người nhận</Label>
+											<Select
+												value={editForm[group.key].salesmanId}
+												onValueChange={(value) =>
+													updateEditGroupSalesman(group.key, value)
+												}
+											>
 												<SelectTrigger>
-													<SelectValue placeholder="Ch???n ng?????i nh???n">
-														{editForm[group.key].salesmanId ? getSalesmanDisplayName(editForm[group.key].salesmanId) : undefined}
+													<SelectValue placeholder="Chọn người nhận">
+														{editForm[group.key].salesmanId
+															? getSalesmanDisplayName(
+																	editForm[group.key].salesmanId,
+																)
+															: undefined}
 													</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
@@ -1587,10 +1645,13 @@ function DiscountsPage() {
 											</Select>
 										</div>
 										<div className="space-y-2">
-											<Label>T???ng chi???t kh???u %</Label>
+											<Label>Tổng chiết khấu %</Label>
 											<div className="flex h-9 items-center text-muted-foreground text-sm">
-												{editForm[group.key].percent && Number(editForm[group.key].percent) > 0
-													? formatPercentValue(Number(editForm[group.key].percent))
+												{editForm[group.key].percent &&
+												Number(editForm[group.key].percent) > 0
+													? formatPercentValue(
+															Number(editForm[group.key].percent),
+														)
 													: "-"}
 											</div>
 										</div>
@@ -1598,26 +1659,32 @@ function DiscountsPage() {
 								))}
 								<div className="flex items-center justify-end border-t pt-4">
 									<div className="text-right">
-										<div className="text-muted-foreground text-xs">T???ng chi???t kh???u %</div>
+										<div className="text-muted-foreground text-xs">
+											Tổng chiết khấu %
+										</div>
 										<div className="font-medium text-sm">
-											{totalEditDiscountPercent > 0 ? formatPercentValue(totalEditDiscountPercent) : "-"}
+											{totalEditDiscountPercent > 0
+												? formatPercentValue(totalEditDiscountPercent)
+												: "-"}
 										</div>
 									</div>
 								</div>
 							</div>
 							<div className="space-y-2">
-								<Label>Ghi ch??</Label>
+								<Label>Ghi chú</Label>
 								<Textarea
 									value={editForm.notes}
-									onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+									onChange={(e) =>
+										setEditForm({ ...editForm, notes: e.target.value })
+									}
 								/>
 							</div>
 						</div>
 						<DialogFooter>
 							<Button type="button" variant="outline" onClick={closeEditDialog}>
-								Hu???
+								Huỷ
 							</Button>
-							<Button type="submit">L??u thay ?????i</Button>
+							<Button type="submit">Lưu thay đổi</Button>
 						</DialogFooter>
 					</form>
 				</DialogContent>
@@ -1669,8 +1736,8 @@ function DiscountsPage() {
 										<AlertDialogTitle>Xác nhận xóa hàng loạt</AlertDialogTitle>
 										<AlertDialogDescription>
 											Bạn có chắc muốn xóa{" "}
-											<strong>{selectedRuleGroups.length}</strong> nhom chiet
-											khau da chon?
+											<strong>{selectedRuleGroups.length}</strong> nhóm chiết
+											khấu đã chọn?
 										</AlertDialogDescription>
 									</AlertDialogHeader>
 									<AlertDialogFooter>
@@ -1696,14 +1763,14 @@ function DiscountsPage() {
 				</CardHeader>
 				<CardContent>
 					{rules === undefined ? (
-						<div className="text-muted-foreground">Dang tai...</div>
+						<div className="text-muted-foreground">Đang tải...</div>
 					) : rules.length === 0 ? (
 						<div className="text-muted-foreground">
-							Chua co quy tac chiet khau nao
+							Chưa có quy tắc chiết khấu nào
 						</div>
 					) : !filteredRuleGroups || filteredRuleGroups.length === 0 ? (
 						<div className="text-muted-foreground">
-							Khong tim thay quy tac theo ten san pham/thuoc
+							Không tìm thấy quy tắc theo tên sản phẩm/thuốc
 						</div>
 					) : (
 						<div className="overflow-x-auto">
@@ -1720,9 +1787,9 @@ function DiscountsPage() {
 												disabled={visibleRuleIds.length === 0}
 											/>
 										</TableHead>
-										<TableHead rowSpan={2}>Ngay hach toan</TableHead>
+										<TableHead rowSpan={2}>Ngày hạch toán</TableHead>
 										<TableHead rowSpan={2} className="text-right">
-											Don gia
+											Đơn giá
 										</TableHead>
 										{discountGroups.map((group) => (
 											<TableHead
@@ -1734,18 +1801,21 @@ function DiscountsPage() {
 											</TableHead>
 										))}
 										<TableHead rowSpan={2} className="text-right">
-											Tong chiet khau
+											Tổng chiết khấu
 										</TableHead>
 										<TableHead rowSpan={2} className="text-right">
-											Trang thai
+											Trạng thái
+										</TableHead>
+										<TableHead rowSpan={2} className="text-right">
+											Hành động
 										</TableHead>
 									</TableRow>
 									<TableRow>
 										{discountGroups.map((group) => (
 											<Fragment key={`${group.key}-sub`}>
-												<TableHead className="text-right">Ty le</TableHead>
+												<TableHead className="text-right">Tỷ lệ</TableHead>
 												<TableHead className="text-center">
-													Nguoi nhan
+													Người nhận
 												</TableHead>
 											</Fragment>
 										))}
@@ -1758,7 +1828,9 @@ function DiscountsPage() {
 												? ruleGroup.unitPrice
 												: ruleGroup.product?.salePrice;
 										const isSelected = selectedRuleIds.includes(ruleGroup.id);
-										const groupStatus = getRuleGroupStatus(ruleGroup.groupRules);
+										const groupStatus = getRuleGroupStatus(
+											ruleGroup.groupRules,
+										);
 
 										return (
 											<Fragment key={ruleGroup.id}>
@@ -1768,17 +1840,24 @@ function DiscountsPage() {
 															type="checkbox"
 															checked={isSelected}
 															onChange={(e) =>
-																toggleRuleSelection(ruleGroup.id, e.target.checked)
+																toggleRuleSelection(
+																	ruleGroup.id,
+																	e.target.checked,
+																)
 															}
 														/>
 													</TableCell>
 													<TableCell>
-														<div className="font-medium">{formatDate(ruleGroup.createdAt)}</div>
-														<div className="text-muted-foreground text-xs">{ruleGroup.name}</div>
+														<div className="font-medium">
+															{formatDate(ruleGroup.createdAt)}
+														</div>
+														<div className="text-muted-foreground text-xs">
+															{ruleGroup.name}
+														</div>
 														<div className="text-muted-foreground text-xs">
 															{ruleGroup.product?.name
-																? `San pham/Thuoc: ${ruleGroup.product.name}`
-																: "San pham/Thuoc: Tat ca san pham/thuoc"}
+																? `Sản phẩm/Thuốc: ${ruleGroup.product.name}`
+																: "Sản phẩm/Thuốc: Tất cả sản phẩm/thuốc"}
 														</div>
 													</TableCell>
 													<TableCell className="text-right">
@@ -1791,7 +1870,11 @@ function DiscountsPage() {
 														return (
 															<Fragment key={`${ruleGroup.id}-${group.key}`}>
 																<TableCell className="text-right">
-																	{groupRule ? formatPercentValue(groupRule.discountPercent) : "0%"}
+																	{groupRule
+																		? formatPercentValue(
+																				groupRule.discountPercent,
+																			)
+																		: "0%"}
 																</TableCell>
 																<TableCell className="text-center">
 																	{groupRule?.salesman?.name ?? "-"}
@@ -1803,68 +1886,103 @@ function DiscountsPage() {
 														{formatPercentValue(ruleGroup.totalDiscountPercent)}
 													</TableCell>
 													<TableCell className="text-right">
-														<div className="space-y-2">
-															<div className={groupStatus.className}>{groupStatus.label}</div>
-															<div className="flex flex-wrap justify-end gap-2">
-																<Button size="sm" variant="outline" onClick={() => startEditingGroup(ruleGroup)}>
-																	Chi tiet
+														<div className={groupStatus.className}>
+															{groupStatus.label}
+														</div>
+													</TableCell>
+													<TableCell className="text-right">
+														<div className="flex flex-wrap justify-end gap-2">
+															<Button
+																size="sm"
+																variant="outline"
+																onClick={() => startEditingGroup(ruleGroup)}
+															>
+																Chi tiết
+															</Button>
+															<Button
+																size="sm"
+																variant="outline"
+																onClick={() => startEditingGroup(ruleGroup)}
+															>
+																<Pencil className="mr-1 h-3.5 w-3.5" />
+																Sửa
+															</Button>
+															{groupStatus.nextIsActive ? (
+																<Button
+																	size="sm"
+																	variant="outline"
+																	onClick={() =>
+																		toggleRuleGroupActive(ruleGroup)
+																	}
+																>
+																	{groupStatus.nextActionLabel}
 																</Button>
-																<Button size="sm" variant="outline" onClick={() => startEditingGroup(ruleGroup)}>
-																	<Pencil className="mr-1 h-3.5 w-3.5" />
-																	Sua
-																</Button>
-																{groupStatus.nextIsActive ? (
-																	<Button size="sm" variant="outline" onClick={() => toggleRuleGroupActive(ruleGroup)}>
-																		{groupStatus.nextActionLabel}
-																	</Button>
-																) : (
-																	<AlertDialog>
-																		<AlertDialogTrigger render={<Button size="sm" variant="secondary" />}>
-																			{groupStatus.label}
-																		</AlertDialogTrigger>
-																		<AlertDialogContent>
-																			<AlertDialogHeader>
-																				<AlertDialogTitle>Xac nhan tam dung</AlertDialogTitle>
-																				<AlertDialogDescription>
-																					Ban co chac muon tam dung toan bo nhom <strong>"{ruleGroup.name}"</strong>?
-																				</AlertDialogDescription>
-																			</AlertDialogHeader>
-																			<AlertDialogFooter>
-																				<AlertDialogCancel>Huy</AlertDialogCancel>
-																				<AlertDialogAction
-																					className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-																					onClick={() => toggleRuleGroupActive(ruleGroup)}
-																				>
-																					{groupStatus.nextActionLabel}
-																				</AlertDialogAction>
-																			</AlertDialogFooter>
-																		</AlertDialogContent>
-																	</AlertDialog>
-																)}
+															) : (
 																<AlertDialog>
-																	<AlertDialogTrigger render={<Button size="sm" variant="destructive" />}>
-																		<Trash2 className="mr-1 h-3.5 w-3.5" />
-																		Xoa
+																	<AlertDialogTrigger
+																		render={
+																			<Button size="sm" variant="secondary" />
+																		}
+																	>
+																		{groupStatus.label}
 																	</AlertDialogTrigger>
 																	<AlertDialogContent>
 																		<AlertDialogHeader>
-																			<AlertDialogTitle>Xac nhan xoa chiet khau</AlertDialogTitle>
+																			<AlertDialogTitle>
+																				Xác nhận tạm dừng
+																			</AlertDialogTitle>
 																			<AlertDialogDescription>
-																				Ban co chac muon <strong>xoa</strong> nhom chiet khau <strong>"{ruleGroup.name}"</strong>?
+																				Bạn có chắc muốn tạm dừng toàn bộ nhóm{" "}
+																				<strong>"{ruleGroup.name}"</strong>?
 																			</AlertDialogDescription>
 																		</AlertDialogHeader>
 																		<AlertDialogFooter>
-																			<AlertDialogCancel>Huy</AlertDialogCancel>
+																			<AlertDialogCancel>Huỷ</AlertDialogCancel>
 																			<AlertDialogAction
 																				className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-																				onClick={() => handleRemoveDiscountGroup(ruleGroup)}
+																				onClick={() =>
+																					toggleRuleGroupActive(ruleGroup)
+																				}
 																			>
-																				Xoa nhom chiet khau
+																				{groupStatus.nextActionLabel}
 																			</AlertDialogAction>
 																		</AlertDialogFooter>
 																	</AlertDialogContent>
 																</AlertDialog>
-															</div>
+															)}
+															<AlertDialog>
+																<AlertDialogTrigger
+																	render={
+																		<Button size="sm" variant="destructive" />
+																	}
+																>
+																	<Trash2 className="mr-1 h-3.5 w-3.5" />
+																	Xóa
+																</AlertDialogTrigger>
+																<AlertDialogContent>
+																	<AlertDialogHeader>
+																		<AlertDialogTitle>
+																			Xác nhận xóa chiết khấu
+																		</AlertDialogTitle>
+																		<AlertDialogDescription>
+																			Bạn có chắc muốn <strong>xóa</strong> nhóm
+																			chiết khấu{" "}
+																			<strong>"{ruleGroup.name}"</strong>?
+																		</AlertDialogDescription>
+																	</AlertDialogHeader>
+																	<AlertDialogFooter>
+																		<AlertDialogCancel>Huỷ</AlertDialogCancel>
+																		<AlertDialogAction
+																			className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+																			onClick={() =>
+																				handleRemoveDiscountGroup(ruleGroup)
+																			}
+																		>
+																			Xóa nhóm chiết khấu
+																		</AlertDialogAction>
+																	</AlertDialogFooter>
+																</AlertDialogContent>
+															</AlertDialog>
 														</div>
 													</TableCell>
 												</TableRow>
