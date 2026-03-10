@@ -216,6 +216,10 @@ const discountWorkbookHeaderOrder = [
 	discountWorkbookColumns.totalDiscountPercent,
 ] as const;
 
+const discountImportWorkbookHeaderOrder = discountWorkbookHeaderOrder.filter(
+	(header) => header !== discountWorkbookColumns.totalDiscountPercent,
+);
+
 const discountImportSheetName = "Nhap_lieu";
 
 type DiscountImportGroupPayload = {
@@ -234,7 +238,6 @@ type DiscountImportRowPayload = {
 	createdByStaff: string;
 	notes?: string;
 	status?: string;
-	totalDiscountPercent?: string;
 	doctor: DiscountImportGroupPayload;
 	sales: DiscountImportGroupPayload;
 	payment: DiscountImportGroupPayload;
@@ -1088,11 +1091,47 @@ function DiscountsPage() {
 
 	const handleDownloadTemplate = async () => {
 		try {
-			const XLSX = await import("xlsx");
+			const ExcelJS = await import("exceljs");
+			const workbook = new ExcelJS.Workbook();
+			const applySheetHeaderStyle = (
+				worksheet: ReturnType<typeof workbook.addWorksheet>,
+				headers: string[],
+			) => {
+				worksheet.views = [{ state: "frozen", ySplit: 1 }];
+				worksheet.columns = headers.map((header) => ({
+					header,
+					key: header,
+					width: Math.max(16, Math.min(28, header.length + 4)),
+				}));
+				worksheet.getRow(1).height = 24;
+				worksheet.autoFilter = {
+					from: { row: 1, column: 1 },
+					to: { row: 1, column: headers.length },
+				};
 
-			const inputSheet = XLSX.utils.aoa_to_sheet([
-				[...discountWorkbookHeaderOrder],
-			]);
+				worksheet.getRow(1).eachCell((cell) => {
+					cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+					cell.fill = {
+						type: "pattern",
+						pattern: "solid",
+						fgColor: { argb: "FF0F766E" },
+					};
+					cell.alignment = {
+						vertical: "middle",
+						horizontal: "center",
+						wrapText: true,
+					};
+					cell.border = {
+						top: { style: "thin", color: { argb: "FFD1D5DB" } },
+						left: { style: "thin", color: { argb: "FFD1D5DB" } },
+						bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+						right: { style: "thin", color: { argb: "FFD1D5DB" } },
+					};
+				});
+			};
+
+			const inputSheet = workbook.addWorksheet(discountImportSheetName);
+			applySheetHeaderStyle(inputSheet, [...discountImportWorkbookHeaderOrder]);
 
 			const exampleRows = [
 				{
@@ -1120,7 +1159,6 @@ function DiscountsPage() {
 					[discountWorkbookGroupColumns.manager.percent]: 1,
 					[discountWorkbookGroupColumns.manager.salesmanCode]: "QL01",
 					[discountWorkbookGroupColumns.manager.salesmanName]: "Hoàng Thị E",
-					[discountWorkbookColumns.totalDiscountPercent]: 15,
 				},
 				{
 					[discountWorkbookColumns.ruleName]:
@@ -1148,15 +1186,20 @@ function DiscountsPage() {
 					[discountWorkbookGroupColumns.manager.percent]: "",
 					[discountWorkbookGroupColumns.manager.salesmanCode]: "",
 					[discountWorkbookGroupColumns.manager.salesmanName]: "",
-					[discountWorkbookColumns.totalDiscountPercent]: 4,
 				},
 			];
 
-			const exampleSheet = XLSX.utils.json_to_sheet(exampleRows, {
-				header: [...discountWorkbookHeaderOrder],
+			const exampleSheet = workbook.addWorksheet("Vi_du");
+			applySheetHeaderStyle(exampleSheet, [
+				...discountImportWorkbookHeaderOrder,
+			]);
+			exampleRows.forEach((row) => {
+				exampleSheet.addRow(
+					discountImportWorkbookHeaderOrder.map((header) => row[header] ?? ""),
+				);
 			});
 
-			const guideSheet = XLSX.utils.aoa_to_sheet([
+			const guideRows = [
 				["Hướng dẫn import bảng chiết khấu"],
 				[
 					`1) Nhập dữ liệu vào sheet ${discountImportSheetName} theo đúng tiêu đề cột.`,
@@ -1174,21 +1217,34 @@ function DiscountsPage() {
 				],
 				["7) status hợp lệ: active/inactive (chấp nhận hoat_dong/tam_dung)."],
 				[
-					"8) Tổng chiết khấu (%) là cột tham chiếu khi xuất, có thể để trống khi import.",
+					"8) Tổng chiết khấu (%) không cần nhập trong file mẫu/import; hệ thống sẽ tự cộng từ các nhóm chiết khấu.",
 				],
 				["9) Tỷ lệ từng nhóm từ 0 đến 100, Đơn giá >= 0 hoặc để trống."],
-			]);
+			];
 
-			const workbook = XLSX.utils.book_new();
-			XLSX.utils.book_append_sheet(
-				workbook,
-				inputSheet,
-				discountImportSheetName,
-			);
-			XLSX.utils.book_append_sheet(workbook, exampleSheet, "Vi_du");
-			XLSX.utils.book_append_sheet(workbook, guideSheet, "Huong_dan");
+			const guideSheet = workbook.addWorksheet("Huong_dan");
+			guideRows.forEach((row) => {
+				guideSheet.addRow(row);
+			});
+			guideSheet.columns = [{ width: 120 }];
+			guideSheet.getCell("A1").font = {
+				bold: true,
+				size: 14,
+				color: { argb: "FF0F766E" },
+			};
+			guideSheet.getCell("A1").fill = {
+				type: "pattern",
+				pattern: "solid",
+				fgColor: { argb: "FFE6FFFB" },
+			};
+			guideSheet.eachRow((row, rowNumber) => {
+				row.height = rowNumber === 1 ? 24 : 22;
+				row.eachCell((cell) => {
+					cell.alignment = { wrapText: true, vertical: "middle" };
+				});
+			});
 
-			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const output = await workbook.xlsx.writeBuffer();
 			const blob = new Blob([output], {
 				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			});
@@ -1238,7 +1294,7 @@ function DiscountsPage() {
 				},
 			);
 			const headerRow = (headerRows[0] ?? []).map((cell) => toCellString(cell));
-			const missingHeaders = discountWorkbookHeaderOrder.filter(
+			const missingHeaders = discountImportWorkbookHeaderOrder.filter(
 				(header) => !headerRow.includes(header),
 			);
 			if (missingHeaders.length > 0) {
@@ -1263,9 +1319,6 @@ function DiscountsPage() {
 					createdByStaff: toCellString(row[discountWorkbookColumns.createdBy]),
 					notes: toCellString(row[discountWorkbookColumns.notes]),
 					status: toCellString(row[discountWorkbookColumns.status]),
-					totalDiscountPercent: toCellString(
-						row[discountWorkbookColumns.totalDiscountPercent],
-					),
 					doctor: {
 						percent: toCellString(
 							row[discountWorkbookGroupColumns.doctor.percent],
@@ -1322,11 +1375,30 @@ function DiscountsPage() {
 						),
 					},
 				}))
-				.filter((row) =>
-					Object.values(row).some((value) =>
-						typeof value === "string" ? value.trim().length > 0 : false,
-					),
-				);
+				.filter((row) => {
+					const topLevelHasValue = [
+						row.name,
+						row.customerCode,
+						row.customerName,
+						row.productSku,
+						row.productName,
+						row.unitPrice,
+						row.createdByStaff,
+						row.notes,
+						row.status,
+					].some((value) => value?.trim().length);
+
+					const groupedHasValue = discountGroups.some((group) => {
+						const groupRow = row[group.key];
+						return [
+							groupRow.percent,
+							groupRow.salesmanCode,
+							groupRow.salesmanName,
+						].some((value) => value?.trim().length);
+					});
+
+					return topLevelHasValue || groupedHasValue;
+				});
 
 			if (rows.length === 0) {
 				throw new Error("Sheet import không có dữ liệu hợp lệ");

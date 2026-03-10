@@ -646,7 +646,6 @@ export const importMany = mutation({
 				createdByStaff: v.string(),
 				notes: v.optional(v.string()),
 				status: v.optional(v.string()),
-				totalDiscountPercent: v.optional(v.string()),
 				doctor: importDiscountGroupValidator,
 				sales: importDiscountGroupValidator,
 				payment: importDiscountGroupValidator,
