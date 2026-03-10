@@ -156,65 +156,90 @@ const groupToDiscountType: Record<
 
 const discountWorkbookColumns = {
 	ruleName: "Tên quy tắc",
-	discountTypeCode: "Mã loại chiết khấu",
-	discountTypeLabel: "Tên loại chiết khấu",
 	customerCode: "Mã khách hàng",
 	customerName: "Tên khách hàng",
 	productSku: "SKU thuốc",
 	productName: "Tên thuốc",
-	salesmanCode: "Mã người nhận",
-	salesmanName: "Tên người nhận",
-	totalDiscountPercent: "Tổng chiết khấu (%)",
 	unitPrice: "Đơn giá",
 	createdBy: "Người tạo",
 	notes: "Ghi chú",
 	status: "Trạng thái",
+	totalDiscountPercent: "Tổng chiết khấu (%)",
 } as const;
+
+const discountWorkbookGroupColumns: Record<
+	DiscountGroupKey,
+	{ percent: string; salesmanCode: string; salesmanName: string }
+> = {
+	doctor: {
+		percent: "Chiết khấu BS (%)",
+		salesmanCode: "Mã người nhận BS",
+		salesmanName: "Tên người nhận BS",
+	},
+	sales: {
+		percent: "Chiết khấu NT, KD (%)",
+		salesmanCode: "Mã người nhận NT, KD",
+		salesmanName: "Tên người nhận NT, KD",
+	},
+	payment: {
+		percent: "Chiết khấu thanh toán (%)",
+		salesmanCode: "Mã người nhận thanh toán",
+		salesmanName: "Tên người nhận thanh toán",
+	},
+	ctv: {
+		percent: "Chiết khấu CTV (%)",
+		salesmanCode: "Mã người nhận CTV",
+		salesmanName: "Tên người nhận CTV",
+	},
+	manager: {
+		percent: "Chiết khấu Quản lý (%)",
+		salesmanCode: "Mã người nhận Quản lý",
+		salesmanName: "Tên người nhận Quản lý",
+	},
+};
 
 const discountWorkbookHeaderOrder = [
 	discountWorkbookColumns.ruleName,
-	discountWorkbookColumns.discountTypeCode,
-	discountWorkbookColumns.discountTypeLabel,
 	discountWorkbookColumns.customerCode,
 	discountWorkbookColumns.customerName,
 	discountWorkbookColumns.productSku,
 	discountWorkbookColumns.productName,
-	discountWorkbookColumns.salesmanCode,
-	discountWorkbookColumns.salesmanName,
-	discountWorkbookColumns.totalDiscountPercent,
 	discountWorkbookColumns.unitPrice,
 	discountWorkbookColumns.createdBy,
 	discountWorkbookColumns.notes,
 	discountWorkbookColumns.status,
+	...discountGroups.flatMap((group) => [
+		discountWorkbookGroupColumns[group.key].percent,
+		discountWorkbookGroupColumns[group.key].salesmanCode,
+		discountWorkbookGroupColumns[group.key].salesmanName,
+	]),
+	discountWorkbookColumns.totalDiscountPercent,
 ] as const;
 
 const discountImportSheetName = "Nhap_lieu";
 
-const discountTypeCodeByValue: Record<(typeof discountTypes)[number], string> =
-	{
-		Doctor: "DOCTOR",
-		hospital: "HOSPITAL",
-		payment: "PAYMENT",
-		CTV: "CTV",
-		Salesman: "SALESMAN",
-		Manager: "MANAGER",
-	};
+type DiscountImportGroupPayload = {
+	percent?: string;
+	salesmanCode?: string;
+	salesmanName?: string;
+};
 
 type DiscountImportRowPayload = {
 	name: string;
-	discountTypeCode: string;
-	discountTypeLabel?: string;
 	customerCode?: string;
 	customerName?: string;
 	productSku?: string;
 	productName?: string;
-	salesmanCode: string;
-	salesmanName?: string;
-	discountPercent: string;
 	unitPrice?: string;
 	createdByStaff: string;
 	notes?: string;
 	status?: string;
+	totalDiscountPercent?: string;
+	doctor: DiscountImportGroupPayload;
+	sales: DiscountImportGroupPayload;
+	payment: DiscountImportGroupPayload;
+	ctv: DiscountImportGroupPayload;
+	manager: DiscountImportGroupPayload;
 };
 
 const createEmptyDiscountForm = (): DiscountFormState => ({
@@ -415,6 +440,10 @@ function DiscountsPage() {
 		historyFieldLabels[field] ?? field;
 	const isHistoryValueEmpty = (value?: string) =>
 		value === undefined || value === null || value === "";
+	const normalizeHistoryValue = (value?: string) =>
+		isHistoryValueEmpty(value) ? "" : value;
+	const hasHistoryDifference = (from?: string, to?: string) =>
+		normalizeHistoryValue(from) !== normalizeHistoryValue(to);
 	const tokenizeHistoryValue = (value: string) =>
 		value.match(/[\p{L}\p{N}_]+|[^\p{L}\p{N}_]+/gu) ?? [value];
 	const getHistoryDiffParts = (value?: string, compareTo?: string) => {
@@ -841,11 +870,20 @@ function DiscountsPage() {
 	};
 
 	const openHistoryDialog = (ruleGroup: DiscountRuleGroupRow) => {
+		const entries = getRuleGroupEditHistory(ruleGroup)
+			.map((entry) => ({
+				...entry,
+				changes: entry.changes.filter((change) =>
+					hasHistoryDifference(change.from, change.to),
+				),
+			}))
+			.filter((entry) => entry.changes.length > 0);
+
 		setHistorySnapshot({
 			name: ruleGroup.name,
 			updatedAt: ruleGroup.updatedAt,
 			totalDiscountPercent: ruleGroup.totalDiscountPercent,
-			entries: getRuleGroupEditHistory(ruleGroup),
+			entries,
 		});
 		setHistoryDialogOpen(true);
 	};
@@ -984,29 +1022,39 @@ function DiscountsPage() {
 
 		try {
 			const XLSX = await import("xlsx");
-			const rows = filteredRuleGroups.flatMap((group) =>
-				group.groupRules.map((rule) => ({
-					[discountWorkbookColumns.ruleName]: rule.name,
-					[discountWorkbookColumns.discountTypeCode]:
-						discountTypeCodeByValue[rule.discountType],
-					[discountWorkbookColumns.discountTypeLabel]:
-						discountTypeLabels[rule.discountType],
-					[discountWorkbookColumns.customerCode]: rule.customer?.code ?? "",
-					[discountWorkbookColumns.customerName]: rule.customer?.name ?? "",
-					[discountWorkbookColumns.productSku]: rule.product?.sku ?? "",
-					[discountWorkbookColumns.productName]: rule.product?.name ?? "",
-					[discountWorkbookColumns.salesmanCode]: rule.salesman?.code ?? "",
-					[discountWorkbookColumns.salesmanName]: rule.salesman?.name ?? "",
-					[discountWorkbookColumns.totalDiscountPercent]: rule.discountPercent,
+			const rows = filteredRuleGroups.map((group) => {
+				const row: Record<string, string | number> = {
+					[discountWorkbookColumns.ruleName]: group.name,
+					[discountWorkbookColumns.customerCode]: group.customer?.code ?? "",
+					[discountWorkbookColumns.customerName]: group.customer?.name ?? "",
+					[discountWorkbookColumns.productSku]: group.product?.sku ?? "",
+					[discountWorkbookColumns.productName]: group.product?.name ?? "",
 					[discountWorkbookColumns.unitPrice]:
-						typeof rule.unitPrice === "number" ? rule.unitPrice : "",
-					[discountWorkbookColumns.createdBy]: rule.createdByStaff,
-					[discountWorkbookColumns.notes]: rule.notes ?? "",
-					[discountWorkbookColumns.status]: rule.isActive
+						typeof group.unitPrice === "number" ? group.unitPrice : "",
+					[discountWorkbookColumns.createdBy]: group.createdByStaff,
+					[discountWorkbookColumns.notes]: group.notes ?? "",
+					[discountWorkbookColumns.status]: group.groupRules.some(
+						(rule) => rule.isActive,
+					)
 						? "active"
 						: "inactive",
-				})),
-			);
+					[discountWorkbookColumns.totalDiscountPercent]:
+						group.totalDiscountPercent,
+				};
+
+				for (const discountGroup of discountGroups) {
+					const groupRule = group.rulesByGroup[discountGroup.key];
+					const columns = discountWorkbookGroupColumns[discountGroup.key];
+					row[columns.percent] =
+						typeof groupRule?.discountPercent === "number"
+							? groupRule.discountPercent
+							: "";
+					row[columns.salesmanCode] = groupRule?.salesman?.code ?? "";
+					row[columns.salesmanName] = groupRule?.salesman?.name ?? "";
+				}
+
+				return row;
+			});
 
 			const worksheet = XLSX.utils.json_to_sheet(rows, {
 				header: [...discountWorkbookHeaderOrder],
@@ -1048,36 +1096,59 @@ function DiscountsPage() {
 
 			const exampleRows = [
 				{
-					[discountWorkbookColumns.ruleName]: "CK BS Cty A - AMOX500",
-					[discountWorkbookColumns.discountTypeCode]: "DOCTOR",
-					[discountWorkbookColumns.discountTypeLabel]: "Chiết khấu BS",
+					[discountWorkbookColumns.ruleName]: "CK nha thuoc Minh Tam - AMOX500",
 					[discountWorkbookColumns.customerCode]: "KH001",
 					[discountWorkbookColumns.customerName]: "Nhà thuốc Minh Tâm",
 					[discountWorkbookColumns.productSku]: "AMOX500",
 					[discountWorkbookColumns.productName]: "Amoxicillin 500mg",
-					[discountWorkbookColumns.salesmanCode]: "NVKD01",
-					[discountWorkbookColumns.salesmanName]: "Nguyễn Văn A",
-					[discountWorkbookColumns.totalDiscountPercent]: 8,
 					[discountWorkbookColumns.unitPrice]: 125000,
 					[discountWorkbookColumns.createdBy]: "Phòng kinh doanh",
 					[discountWorkbookColumns.notes]: "Áp dụng quý 1",
 					[discountWorkbookColumns.status]: "active",
+					[discountWorkbookGroupColumns.doctor.percent]: 8,
+					[discountWorkbookGroupColumns.doctor.salesmanCode]: "NVKD01",
+					[discountWorkbookGroupColumns.doctor.salesmanName]: "Nguyễn Văn A",
+					[discountWorkbookGroupColumns.sales.percent]: 3,
+					[discountWorkbookGroupColumns.sales.salesmanCode]: "NVKD02",
+					[discountWorkbookGroupColumns.sales.salesmanName]: "Trần Thị B",
+					[discountWorkbookGroupColumns.payment.percent]: 1,
+					[discountWorkbookGroupColumns.payment.salesmanCode]: "KETOAN01",
+					[discountWorkbookGroupColumns.payment.salesmanName]: "Lê Thu C",
+					[discountWorkbookGroupColumns.ctv.percent]: 2,
+					[discountWorkbookGroupColumns.ctv.salesmanCode]: "CTV01",
+					[discountWorkbookGroupColumns.ctv.salesmanName]: "Phạm Văn D",
+					[discountWorkbookGroupColumns.manager.percent]: 1,
+					[discountWorkbookGroupColumns.manager.salesmanCode]: "QL01",
+					[discountWorkbookGroupColumns.manager.salesmanName]: "Hoàng Thị E",
+					[discountWorkbookColumns.totalDiscountPercent]: 15,
 				},
 				{
-					[discountWorkbookColumns.ruleName]: "CK thanh toán toàn hệ thống",
-					[discountWorkbookColumns.discountTypeCode]: "PAYMENT",
-					[discountWorkbookColumns.discountTypeLabel]: "Chiết khấu thanh toán",
+					[discountWorkbookColumns.ruleName]:
+						"CK thanh toán + CTV toàn hệ thống",
 					[discountWorkbookColumns.customerCode]: "",
 					[discountWorkbookColumns.customerName]: "",
 					[discountWorkbookColumns.productSku]: "",
 					[discountWorkbookColumns.productName]: "",
-					[discountWorkbookColumns.salesmanCode]: "NVKD02",
-					[discountWorkbookColumns.salesmanName]: "Trần Thị B",
-					[discountWorkbookColumns.totalDiscountPercent]: 2.5,
 					[discountWorkbookColumns.unitPrice]: "",
 					[discountWorkbookColumns.createdBy]: "Kế toán",
 					[discountWorkbookColumns.notes]: "Áp dụng toàn bộ khách/sản phẩm",
 					[discountWorkbookColumns.status]: "inactive",
+					[discountWorkbookGroupColumns.doctor.percent]: "",
+					[discountWorkbookGroupColumns.doctor.salesmanCode]: "",
+					[discountWorkbookGroupColumns.doctor.salesmanName]: "",
+					[discountWorkbookGroupColumns.sales.percent]: "",
+					[discountWorkbookGroupColumns.sales.salesmanCode]: "",
+					[discountWorkbookGroupColumns.sales.salesmanName]: "",
+					[discountWorkbookGroupColumns.payment.percent]: 2.5,
+					[discountWorkbookGroupColumns.payment.salesmanCode]: "KETOAN01",
+					[discountWorkbookGroupColumns.payment.salesmanName]: "Lê Thu C",
+					[discountWorkbookGroupColumns.ctv.percent]: 1.5,
+					[discountWorkbookGroupColumns.ctv.salesmanCode]: "CTV02",
+					[discountWorkbookGroupColumns.ctv.salesmanName]: "Ngô Văn F",
+					[discountWorkbookGroupColumns.manager.percent]: "",
+					[discountWorkbookGroupColumns.manager.salesmanCode]: "",
+					[discountWorkbookGroupColumns.manager.salesmanName]: "",
+					[discountWorkbookColumns.totalDiscountPercent]: 4,
 				},
 			];
 
@@ -1092,15 +1163,20 @@ function DiscountsPage() {
 				],
 				["2) Không đổi tên tiêu đề cột, không import theo tên nếu thiếu mã."],
 				["3) Mã khách hàng và SKU thuốc để trống nghĩa là áp dụng toàn cục."],
-				["4) Mã người nhận là bắt buộc."],
 				[
-					"5) discount type code hợp lệ: DOCTOR, HOSPITAL, PAYMENT, CTV, SALESMAN, MANAGER.",
+					"4) Mỗi dòng là 1 nhóm chiết khấu; các cột BS/NT, KD/Thanh toán/CTV/Quản lý nhập theo cặp tỷ lệ + mã người nhận.",
 				],
 				[
-					"6) HOSPITAL và SALESMAN đều hiển thị tại nhóm Chiết khấu NT, KD trên giao diện.",
+					"5) Nếu nhập tỷ lệ thì phải nhập mã người nhận tương ứng; để trống cả 2 cột nếu không áp dụng nhóm đó.",
+				],
+				[
+					"6) Tên người nhận chỉ để tham chiếu, hệ thống import theo mã người nhận.",
 				],
 				["7) status hợp lệ: active/inactive (chấp nhận hoat_dong/tam_dung)."],
-				["8) Tổng chiết khấu (%) từ 0 đến 100, Đơn giá >= 0 hoặc để trống."],
+				[
+					"8) Tổng chiết khấu (%) là cột tham chiếu khi xuất, có thể để trống khi import.",
+				],
+				["9) Tỷ lệ từng nhóm từ 0 đến 100, Đơn giá >= 0 hoặc để trống."],
 			]);
 
 			const workbook = XLSX.utils.book_new();
@@ -1179,25 +1255,72 @@ function DiscountsPage() {
 			const rows: DiscountImportRowPayload[] = rawRows
 				.map((row) => ({
 					name: toCellString(row[discountWorkbookColumns.ruleName]),
-					discountTypeCode: toCellString(
-						row[discountWorkbookColumns.discountTypeCode],
-					),
-					discountTypeLabel: toCellString(
-						row[discountWorkbookColumns.discountTypeLabel],
-					),
 					customerCode: toCellString(row[discountWorkbookColumns.customerCode]),
 					customerName: toCellString(row[discountWorkbookColumns.customerName]),
 					productSku: toCellString(row[discountWorkbookColumns.productSku]),
 					productName: toCellString(row[discountWorkbookColumns.productName]),
-					salesmanCode: toCellString(row[discountWorkbookColumns.salesmanCode]),
-					salesmanName: toCellString(row[discountWorkbookColumns.salesmanName]),
-					discountPercent: toCellString(
-						row[discountWorkbookColumns.totalDiscountPercent],
-					),
 					unitPrice: toCellString(row[discountWorkbookColumns.unitPrice]),
 					createdByStaff: toCellString(row[discountWorkbookColumns.createdBy]),
 					notes: toCellString(row[discountWorkbookColumns.notes]),
 					status: toCellString(row[discountWorkbookColumns.status]),
+					totalDiscountPercent: toCellString(
+						row[discountWorkbookColumns.totalDiscountPercent],
+					),
+					doctor: {
+						percent: toCellString(
+							row[discountWorkbookGroupColumns.doctor.percent],
+						),
+						salesmanCode: toCellString(
+							row[discountWorkbookGroupColumns.doctor.salesmanCode],
+						),
+						salesmanName: toCellString(
+							row[discountWorkbookGroupColumns.doctor.salesmanName],
+						),
+					},
+					sales: {
+						percent: toCellString(
+							row[discountWorkbookGroupColumns.sales.percent],
+						),
+						salesmanCode: toCellString(
+							row[discountWorkbookGroupColumns.sales.salesmanCode],
+						),
+						salesmanName: toCellString(
+							row[discountWorkbookGroupColumns.sales.salesmanName],
+						),
+					},
+					payment: {
+						percent: toCellString(
+							row[discountWorkbookGroupColumns.payment.percent],
+						),
+						salesmanCode: toCellString(
+							row[discountWorkbookGroupColumns.payment.salesmanCode],
+						),
+						salesmanName: toCellString(
+							row[discountWorkbookGroupColumns.payment.salesmanName],
+						),
+					},
+					ctv: {
+						percent: toCellString(
+							row[discountWorkbookGroupColumns.ctv.percent],
+						),
+						salesmanCode: toCellString(
+							row[discountWorkbookGroupColumns.ctv.salesmanCode],
+						),
+						salesmanName: toCellString(
+							row[discountWorkbookGroupColumns.ctv.salesmanName],
+						),
+					},
+					manager: {
+						percent: toCellString(
+							row[discountWorkbookGroupColumns.manager.percent],
+						),
+						salesmanCode: toCellString(
+							row[discountWorkbookGroupColumns.manager.salesmanCode],
+						),
+						salesmanName: toCellString(
+							row[discountWorkbookGroupColumns.manager.salesmanName],
+						),
+					},
 				}))
 				.filter((row) =>
 					Object.values(row).some((value) =>

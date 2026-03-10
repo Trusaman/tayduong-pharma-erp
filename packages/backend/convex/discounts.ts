@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
 
 const discountTypeValidator = v.union(
@@ -14,6 +14,12 @@ const discountTypeValidator = v.union(
 const discountDetailValidator = v.object({
 	salesmanId: v.id("salesmen"),
 	discountPercent: v.number(),
+});
+
+const importDiscountGroupValidator = v.object({
+	percent: v.optional(v.string()),
+	salesmanCode: v.optional(v.string()),
+	salesmanName: v.optional(v.string()),
 });
 
 const discountTypeLabels = {
@@ -48,15 +54,6 @@ const fieldLabels = {
 	paymentDiscount: "Chiet khau thanh toan",
 	ctvDiscount: "Chiet khau CTV",
 	managerDiscount: "Chiet khau Quan ly",
-} as const;
-
-const importDiscountTypeCodeMap = {
-	DOCTOR: "Doctor",
-	HOSPITAL: "hospital",
-	PAYMENT: "payment",
-	CTV: "CTV",
-	SALESMAN: "Salesman",
-	MANAGER: "Manager",
 } as const;
 
 type DiscountTypeValue = keyof typeof discountTypeLabels;
@@ -404,7 +401,7 @@ export const create = mutation({
 			}
 		}
 
-		const insertDoc: Record<string, unknown> = {
+		const insertDoc: Omit<Doc<"discountRules">, "_id" | "_creationTime"> = {
 			name: args.name,
 			ruleGroupId,
 			customerId: args.customerId,
@@ -418,7 +415,7 @@ export const create = mutation({
 		};
 		insertDoc[field] = detail;
 
-		return await ctx.db.insert("discountRules", insertDoc as any);
+		return await ctx.db.insert("discountRules", insertDoc);
 	},
 });
 
@@ -641,19 +638,20 @@ export const importMany = mutation({
 		rows: v.array(
 			v.object({
 				name: v.string(),
-				discountTypeCode: v.string(),
-				discountTypeLabel: v.optional(v.string()),
 				customerCode: v.optional(v.string()),
 				customerName: v.optional(v.string()),
 				productSku: v.optional(v.string()),
 				productName: v.optional(v.string()),
-				salesmanCode: v.string(),
-				salesmanName: v.optional(v.string()),
-				discountPercent: v.string(),
 				unitPrice: v.optional(v.string()),
 				createdByStaff: v.string(),
 				notes: v.optional(v.string()),
 				status: v.optional(v.string()),
+				totalDiscountPercent: v.optional(v.string()),
+				doctor: importDiscountGroupValidator,
+				sales: importDiscountGroupValidator,
+				payment: importDiscountGroupValidator,
+				ctv: importDiscountGroupValidator,
+				manager: importDiscountGroupValidator,
 			}),
 		),
 	},
@@ -679,42 +677,27 @@ export const importMany = mutation({
 		);
 
 		const errors: string[] = [];
-		const preparedRows = new Map<
-			string,
-			{
-				name: string;
-				customerId?: Id<"customers">;
-				productId?: Id<"products">;
-				unitPrice?: number;
-				createdByStaff: string;
-				notes?: string;
-				isActive: boolean;
-				details: Partial<
-					Record<
-						DiscountFieldName,
-						{ salesmanId: Id<"salesmen">; discountPercent: number }
-					>
-				>;
-			}
-		>();
+		const preparedRows: Array<{
+			name: string;
+			customerId?: Id<"customers">;
+			productId?: Id<"products">;
+			unitPrice?: number;
+			createdByStaff: string;
+			notes?: string;
+			isActive: boolean;
+			details: Partial<
+				Record<
+					DiscountFieldName,
+					{ salesmanId: Id<"salesmen">; discountPercent: number }
+				>
+			>;
+		}> = [];
 
 		for (const [index, row] of args.rows.entries()) {
 			const rowNumber = index + 2;
 			try {
 				const ruleName = row.name.trim();
 				if (!ruleName) throw new Error("Ten quy tac khong duoc de trong");
-
-				const discountTypeCode = normalizeLookupCode(row.discountTypeCode);
-				const mappedDiscountType =
-					importDiscountTypeCodeMap[
-						discountTypeCode as keyof typeof importDiscountTypeCodeMap
-					];
-				if (!mappedDiscountType) {
-					throw new Error(
-						`Ma loai chiet khau khong hop le: ${row.discountTypeCode}`,
-					);
-				}
-				const field = discountTypeToField[mappedDiscountType];
 
 				const customerCode = row.customerCode?.trim() ?? "";
 				if (!customerCode && row.customerName?.trim()) {
@@ -738,21 +721,6 @@ export const importMany = mutation({
 					throw new Error(`Khong tim thay san pham theo SKU: ${productSku}`);
 				}
 
-				const salesmanCode = row.salesmanCode.trim();
-				if (!salesmanCode) throw new Error("Ma nguoi nhan khong duoc de trong");
-				const salesman = salesmanByCode.get(normalizeLookupCode(salesmanCode));
-				if (!salesman) {
-					throw new Error(`Khong tim thay nguoi nhan theo ma: ${salesmanCode}`);
-				}
-
-				const discountPercent = parseImportNumber(
-					row.discountPercent,
-					"Ty le chiet khau",
-				);
-				if (discountPercent < 0 || discountPercent > 100) {
-					throw new Error("Ty le chiet khau phai nam trong khoang 0-100");
-				}
-
 				const unitPriceRaw = row.unitPrice?.trim() ?? "";
 				const unitPrice = unitPriceRaw
 					? parseImportNumber(unitPriceRaw, "Don gia")
@@ -765,18 +733,94 @@ export const importMany = mutation({
 				if (!createdByStaff) throw new Error("Nguoi tao khong duoc de trong");
 				const notes = row.notes?.trim() ? row.notes.trim() : undefined;
 				const isActive = parseImportStatus(row.status ?? "active");
+				const details: Partial<
+					Record<
+						DiscountFieldName,
+						{ salesmanId: Id<"salesmen">; discountPercent: number }
+					>
+				> = {};
 
-				const groupingKey = [
-					ruleName,
-					customer?._id ?? "all-customers",
-					product?._id ?? "all-products",
-					typeof unitPrice === "number" ? String(unitPrice) : "all-prices",
-					createdByStaff,
-					notes ?? "",
-					isActive ? "active" : "inactive",
-				].join("||");
+				const groups: Array<{
+					field: DiscountFieldName;
+					label: string;
+					data: {
+						percent?: string;
+						salesmanCode?: string;
+						salesmanName?: string;
+					};
+				}> = [
+					{
+						field: "doctorDiscount",
+						label: "Chiet khau BS",
+						data: row.doctor,
+					},
+					{
+						field: "salesDiscount",
+						label: "Chiet khau NT, KD",
+						data: row.sales,
+					},
+					{
+						field: "paymentDiscount",
+						label: "Chiet khau thanh toan",
+						data: row.payment,
+					},
+					{
+						field: "ctvDiscount",
+						label: "Chiet khau CTV",
+						data: row.ctv,
+					},
+					{
+						field: "managerDiscount",
+						label: "Chiet khau Quan ly",
+						data: row.manager,
+					},
+				];
 
-				const existingGroup = preparedRows.get(groupingKey) ?? {
+				for (const group of groups) {
+					const percentRaw = group.data.percent?.trim() ?? "";
+					const salesmanCode = group.data.salesmanCode?.trim() ?? "";
+
+					if (!salesmanCode && group.data.salesmanName?.trim()) {
+						throw new Error(
+							`${group.label}: phai dung ma nguoi nhan, khong import theo ten`,
+						);
+					}
+
+					if (!percentRaw && !salesmanCode) continue;
+
+					if (!percentRaw || !salesmanCode) {
+						throw new Error(
+							`${group.label}: can nhap du ty le va ma nguoi nhan`,
+						);
+					}
+
+					const salesman = salesmanByCode.get(
+						normalizeLookupCode(salesmanCode),
+					);
+					if (!salesman) {
+						throw new Error(
+							`${group.label}: khong tim thay nguoi nhan theo ma ${salesmanCode}`,
+						);
+					}
+
+					const discountPercent = parseImportNumber(percentRaw, group.label);
+					if (discountPercent < 0 || discountPercent > 100) {
+						throw new Error(
+							`${group.label}: ty le chiet khau phai nam trong khoang 0-100`,
+						);
+					}
+
+					details[group.field] = {
+						salesmanId: salesman._id,
+						discountPercent,
+					};
+				}
+
+				if (Object.keys(details).length === 0) {
+					throw new Error("Phai nhap it nhat mot nhom chiet khau");
+				}
+
+				preparedRows.push({
 					name: ruleName,
 					customerId: customer?._id,
 					productId: product?._id,
@@ -784,20 +828,8 @@ export const importMany = mutation({
 					createdByStaff,
 					notes,
 					isActive,
-					details: {},
-				};
-
-				if (existingGroup.details[field]) {
-					throw new Error(
-						`Trung loai chiet khau ${discountTypeLabels[mappedDiscountType]} trong cung mot quy tac`,
-					);
-				}
-
-				existingGroup.details[field] = {
-					salesmanId: salesman._id,
-					discountPercent,
-				};
-				preparedRows.set(groupingKey, existingGroup);
+					details,
+				});
 			} catch (error) {
 				errors.push(
 					`Dong ${rowNumber}: ${error instanceof Error ? error.message : "Loi du lieu"}`,
@@ -810,7 +842,7 @@ export const importMany = mutation({
 		}
 
 		let inactiveCount = 0;
-		for (const prepared of preparedRows.values()) {
+		for (const prepared of preparedRows) {
 			const now = Date.now();
 			await ctx.db.insert("discountRules", {
 				name: prepared.name,
@@ -836,7 +868,7 @@ export const importMany = mutation({
 
 		return {
 			success: true,
-			createdCount: preparedRows.size,
+			createdCount: preparedRows.length,
 			inactiveCount,
 		};
 	},
