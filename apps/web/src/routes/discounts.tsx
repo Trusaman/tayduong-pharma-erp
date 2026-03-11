@@ -848,7 +848,10 @@ function DiscountsPage() {
 		return Array.from(groupedRules.values())
 			.filter((group) => {
 				if (!keyword) return true;
-				return (group.product?.name ?? "").toLowerCase().includes(keyword);
+				return (
+					(group.product?.name ?? "").toLowerCase().includes(keyword) ||
+					(group.customer?.name ?? "").toLowerCase().includes(keyword)
+				);
 			})
 			.sort((left, right) => right.createdAt - left.createdAt);
 	})();
@@ -2229,7 +2232,7 @@ function DiscountsPage() {
 								<Input
 									value={search}
 									onChange={(e) => setSearch(e.target.value)}
-									placeholder="Tìm theo tên sản phẩm/thuốc"
+									placeholder="Tìm theo tên khách hàng hoặc sản phẩm/thuốc"
 									className="pl-8"
 								/>
 							</div>
@@ -2382,6 +2385,11 @@ function DiscountsPage() {
 														</div>
 														<div className="text-muted-foreground text-xs">
 															{ruleGroup.name}
+														</div>
+														<div className="text-muted-foreground text-xs">
+															{ruleGroup.customer?.name
+																? `Khách hàng: ${ruleGroup.customer.name}`
+																: "Khách hàng: Tất cả khách hàng"}
 														</div>
 														<div className="text-muted-foreground text-xs">
 															{ruleGroup.product?.name

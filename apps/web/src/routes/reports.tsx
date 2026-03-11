@@ -120,7 +120,7 @@ function ReportsPage() {
 		) || [];
 	const pendingSO =
 		salesOrders?.filter(
-			(o) => o.status === "pending" || o.status === "partial",
+			(o) => o.status === "pending" || o.status === "delivering",
 		) || [];
 	const completedSO =
 		salesOrders?.filter((o) => o.status === "completed") || [];
@@ -458,7 +458,7 @@ function ReportsPage() {
 															? "default"
 															: order.status === "cancelled"
 																? "destructive"
-																: order.status === "partial"
+																: order.status === "delivering"
 																	? "outline"
 																	: "secondary"
 													}
@@ -486,8 +486,13 @@ function ReportsSkeleton() {
 				<Skeleton className="mt-2 h-4 w-48" />
 			</div>
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-				{[...Array(4)].map((_, i) => (
-					<Card key={i}>
+				{[
+					"inventory-value",
+					"sales-total",
+					"pending-purchase",
+					"pending-sales",
+				].map((cardKey) => (
+					<Card key={cardKey}>
 						<CardHeader className="space-y-0 pb-2">
 							<Skeleton className="h-4 w-24" />
 						</CardHeader>
