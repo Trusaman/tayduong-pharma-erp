@@ -85,6 +85,8 @@ type SalesOrderItemPreview = {
 	}>;
 };
 
+type PeriodRange = ReturnType<typeof getPeriodRange>;
+
 function getPeriodRange(month: number, year: number) {
 	if (!Number.isInteger(month) || month < 1 || month > 12) {
 		throw new ConvexError({ message: "Tháng không hợp lệ" });
@@ -116,32 +118,27 @@ function createEmptyByType(): RecipientByType {
 	};
 }
 
-async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
-	const period = getPeriodRange(month, year);
-	const [ordersByCompletedAt, legacyOrders, rules, salesmen] =
-		await Promise.all([
-			ctx.db
-				.query("salesOrders")
-				.withIndex("by_status_and_completedAt", (q) =>
-					q
-						.eq("status", "completed")
-						.gte("completedAt", period.startDate)
-						.lt("completedAt", period.endDate),
-				)
-				.collect(),
-			ctx.db
-				.query("salesOrders")
-				.withIndex("by_status", (q) => q.eq("status", "completed"))
-				.collect(),
-			ctx.db.query("discountRules").collect(),
-			ctx.db.query("salesmen").collect(),
-		]);
+async function getCompletedOrdersForPeriod(
+	ctx: CalculationCtx,
+	period: PeriodRange,
+) {
+	const [ordersByCompletedAt, legacyOrders] = await Promise.all([
+		ctx.db
+			.query("salesOrders")
+			.withIndex("by_status_and_completedAt", (q) =>
+				q
+					.eq("status", "completed")
+					.gte("completedAt", period.startDate)
+					.lt("completedAt", period.endDate),
+			)
+			.collect(),
+		ctx.db
+			.query("salesOrders")
+			.withIndex("by_status", (q) => q.eq("status", "completed"))
+			.collect(),
+	]);
 
-	const salesmanNameById = new Map(
-		salesmen.map((salesman) => [salesman._id, salesman.name]),
-	);
-
-	const completedOrders = [
+	return [
 		...ordersByCompletedAt,
 		...legacyOrders.filter((order) => {
 			if (order.completedAt) return false;
@@ -156,6 +153,36 @@ async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
 			right.completedAt ?? right.updatedAt ?? right.orderDate;
 		return rightCompletedAt - leftCompletedAt;
 	});
+}
+
+function resolveBaseUnitPrice(item: SalesOrderItemPreview) {
+	if (typeof item.baseUnitPrice === "number" && item.baseUnitPrice > 0) {
+		return item.baseUnitPrice;
+	}
+
+	if ((item.discountAmount ?? 0) > 0 && item.quantity > 0) {
+		return roundMoney(
+			item.unitPrice + (item.discountAmount ?? 0) / item.quantity,
+		);
+	}
+
+	return item.unitPrice;
+}
+
+async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
+	const period = getPeriodRange(month, year);
+	const [completedOrders, rules, salesmen] = await Promise.all([
+		getCompletedOrdersForPeriod(ctx, period),
+		ctx.db
+			.query("discountRules")
+			.withIndex("by_active", (q) => q.eq("isActive", true))
+			.collect(),
+		ctx.db.query("salesmen").collect(),
+	]);
+
+	const salesmanNameById = new Map(
+		salesmen.map((salesman) => [salesman._id, salesman.name]),
+	);
 
 	const customerIds = [
 		...new Set(completedOrders.map((order) => order.customerId)),
@@ -336,10 +363,19 @@ async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
 		previewEntries.map((entry) => String(entry.salesOrderId)),
 	).size;
 
-	const existingCalculation = await ctx.db
-		.query("monthlyDiscountCalculations")
-		.withIndex("by_period_key", (q) => q.eq("periodKey", period.periodKey))
-		.first();
+	const [existingCalculation, recentRecalculations] = await Promise.all([
+		ctx.db
+			.query("monthlyDiscountCalculations")
+			.withIndex("by_period_key", (q) => q.eq("periodKey", period.periodKey))
+			.first(),
+		ctx.db
+			.query("monthlyDiscountRecalculationLogs")
+			.withIndex("by_period_key_and_createdAt", (q) =>
+				q.eq("periodKey", period.periodKey),
+			)
+			.order("desc")
+			.take(5),
+	]);
 
 	return {
 		period,
@@ -370,12 +406,14 @@ async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
 			),
 		},
 		existingCalculation,
+		recentRecalculations,
 	};
 }
 
-async function ensureReplaceableCalculation(
+async function assertCalculationHasNoPayments(
 	ctx: MutationCtx,
 	existingCalculationId: Id<"monthlyDiscountCalculations">,
+	errorMessage: string,
 ) {
 	const debts = await ctx.db
 		.query("employeeDiscountDebts")
@@ -389,13 +427,61 @@ async function ensureReplaceableCalculation(
 			.query("employeeDiscountDebtPayments")
 			.withIndex("by_debt", (q) => q.eq("debtId", debt._id))
 			.collect();
+
 		if (payments.length > 0) {
 			throw new ConvexError({
-				message:
-					"Tháng này đã phát sinh thanh toán công nợ, không thể lưu đè bảng tính.",
+				message: errorMessage,
 			});
 		}
 	}
+
+	return debts;
+}
+
+function summarizeDebtPayments(
+	totalDebtAmount: number,
+	payments: Array<{ amount: number; paymentDate: number }>,
+): {
+	paidAmount: number;
+	remainingAmount: number;
+	paymentStatus: "unpaid" | "partial" | "paid";
+	lastPaidAt: number | undefined;
+} {
+	const paidAmount = roundMoney(
+		payments.reduce((sum, payment) => sum + payment.amount, 0),
+	);
+
+	if (paidAmount - totalDebtAmount > 0.001) {
+		throw new ConvexError({
+			message: "Tổng thanh toán vượt quá công nợ chiết khấu.",
+		});
+	}
+
+	const remainingAmount = roundMoney(totalDebtAmount - paidAmount);
+	const paymentStatus: "unpaid" | "partial" | "paid" =
+		remainingAmount <= 0 ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
+	const lastPaidAt =
+		payments.length > 0
+			? Math.max(...payments.map((payment) => payment.paymentDate))
+			: undefined;
+
+	return {
+		paidAmount,
+		remainingAmount,
+		paymentStatus,
+		lastPaidAt,
+	};
+}
+
+async function ensureReplaceableCalculation(
+	ctx: MutationCtx,
+	existingCalculationId: Id<"monthlyDiscountCalculations">,
+) {
+	const debts = await assertCalculationHasNoPayments(
+		ctx,
+		existingCalculationId,
+		"Tháng này đã phát sinh thanh toán công nợ, không thể lưu đè bảng tính.",
+	);
 
 	const entries = await ctx.db
 		.query("monthlyDiscountCalculationEntries")
@@ -417,45 +503,30 @@ export const repairMonthlySourceOrders = mutation({
 	args: {
 		month: v.number(),
 		year: v.number(),
+		recalculatedBy: v.string(),
 	},
 	handler: async (ctx, args) => {
 		const period = getPeriodRange(args.month, args.year);
-		const [ordersByCompletedAt, legacyOrders, rules, salesmen] =
-			await Promise.all([
-				ctx.db
-					.query("salesOrders")
-					.withIndex("by_status_and_completedAt", (q) =>
-						q
-							.eq("status", "completed")
-							.gte("completedAt", period.startDate)
-							.lt("completedAt", period.endDate),
-					)
-					.collect(),
-				ctx.db
-					.query("salesOrders")
-					.withIndex("by_status", (q) => q.eq("status", "completed"))
-					.collect(),
-				ctx.db
-					.query("discountRules")
-					.withIndex("by_active", (q) => q.eq("isActive", true))
-					.collect(),
-				ctx.db.query("salesmen").collect(),
-			]);
+		const recalculatedBy = args.recalculatedBy.trim();
+		if (!recalculatedBy) {
+			throw new ConvexError({
+				message: "Không xác định được người thực hiện tính lại chiết khấu.",
+			});
+		}
+
+		const now = Date.now();
+		const [completedOrders, rules, salesmen] = await Promise.all([
+			getCompletedOrdersForPeriod(ctx, period),
+			ctx.db
+				.query("discountRules")
+				.withIndex("by_active", (q) => q.eq("isActive", true))
+				.collect(),
+			ctx.db.query("salesmen").collect(),
+		]);
 
 		const salesmanNameById = new Map(
 			salesmen.map((salesman) => [salesman._id, salesman.name]),
 		);
-
-		const completedOrders = [
-			...ordersByCompletedAt,
-			...legacyOrders.filter((order) => {
-				if (order.completedAt) return false;
-				return (
-					order.orderDate >= period.startDate &&
-					order.orderDate < period.endDate
-				);
-			}),
-		];
 
 		let repairedOrderCount = 0;
 		let repairedItemCount = 0;
@@ -484,37 +555,14 @@ export const repairMonthlySourceOrders = mutation({
 					100,
 					matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
 				);
-				const hasStoredDiscount =
-					(item.discountPercent ?? 0) > 0 || (item.discountAmount ?? 0) > 0;
-				const hasBreakdown = (item.appliedDiscountBreakdown?.length ?? 0) > 0;
-				const hasAppliedDiscountTypes =
-					(item.appliedDiscountTypes?.length ?? 0) > 0;
-				const hasRecoverableBasePrice =
-					typeof item.baseUnitPrice === "number" &&
-					Math.abs(item.baseUnitPrice - item.unitPrice) < 0.001;
-
-				if (
-					autoDiscountPercent <= 0 ||
-					hasStoredDiscount ||
-					hasBreakdown ||
-					!hasAppliedDiscountTypes ||
-					!hasRecoverableBasePrice
-				) {
-					recalculatedItems.push(item);
-					continue;
-				}
-
-				const baseUnitPrice = item.baseUnitPrice;
-				if (typeof baseUnitPrice !== "number") {
-					recalculatedItems.push(item);
-					continue;
-				}
+				const baseUnitPrice = resolveBaseUnitPrice(item);
 				const discountedUnitPrice = roundMoney(
 					baseUnitPrice * (1 - autoDiscountPercent / 100),
 				);
 				const discountAmount = roundMoney(
 					item.quantity * (baseUnitPrice - discountedUnitPrice),
 				);
+				const appliedDiscountTypes = matched.map((rule) => rule.discountType);
 				const appliedDiscountBreakdown = allocateDiscountBreakdown(
 					matched,
 					autoDiscountPercent,
@@ -523,15 +571,28 @@ export const repairMonthlySourceOrders = mutation({
 					...detail,
 					salesmanName: salesmanNameById.get(detail.salesmanId),
 				}));
+				const itemNeedsUpdate =
+					Math.abs((item.baseUnitPrice ?? 0) - baseUnitPrice) > 0.001 ||
+					Math.abs(item.unitPrice - discountedUnitPrice) > 0.001 ||
+					Math.abs((item.discountPercent ?? 0) - autoDiscountPercent) > 0.001 ||
+					Math.abs((item.discountAmount ?? 0) - discountAmount) > 0.001 ||
+					JSON.stringify(item.appliedDiscountTypes ?? []) !==
+						JSON.stringify(appliedDiscountTypes) ||
+					JSON.stringify(item.appliedDiscountBreakdown ?? []) !==
+						JSON.stringify(appliedDiscountBreakdown);
 
-				await ctx.db.patch(item._id, {
-					baseUnitPrice,
-					unitPrice: discountedUnitPrice,
-					discountPercent: autoDiscountPercent,
-					discountAmount,
-					appliedDiscountTypes: matched.map((rule) => rule.discountType),
-					appliedDiscountBreakdown,
-				});
+				if (itemNeedsUpdate) {
+					await ctx.db.patch(item._id, {
+						baseUnitPrice,
+						unitPrice: discountedUnitPrice,
+						discountPercent: autoDiscountPercent,
+						discountAmount,
+						appliedDiscountTypes,
+						appliedDiscountBreakdown,
+					});
+					orderChanged = true;
+					repairedItemCount += 1;
+				}
 
 				recalculatedItems.push({
 					...item,
@@ -539,38 +600,58 @@ export const repairMonthlySourceOrders = mutation({
 					unitPrice: discountedUnitPrice,
 					discountPercent: autoDiscountPercent,
 					discountAmount,
-					appliedDiscountTypes: matched.map((rule) => rule.discountType),
+					appliedDiscountTypes,
 					appliedDiscountBreakdown,
 				});
-				orderChanged = true;
-				repairedItemCount += 1;
 			}
 
-			if (!orderChanged) {
+			const nextTotalAmount = roundMoney(
+				recalculatedItems.reduce(
+					(sum, salesOrderItem) =>
+						sum + salesOrderItem.quantity * salesOrderItem.unitPrice,
+					0,
+				),
+			);
+			const nextTotalDiscountAmount = roundMoney(
+				recalculatedItems.reduce(
+					(sum, salesOrderItem) => sum + (salesOrderItem.discountAmount ?? 0),
+					0,
+				),
+			);
+			const orderNeedsUpdate =
+				Math.abs(order.totalAmount - nextTotalAmount) > 0.001 ||
+				Math.abs((order.totalDiscountAmount ?? 0) - nextTotalDiscountAmount) >
+					0.001;
+
+			if (!orderChanged && !orderNeedsUpdate) {
 				continue;
 			}
 
 			await ctx.db.patch(order._id, {
-				totalAmount: roundMoney(
-					recalculatedItems.reduce(
-						(sum, item) => sum + item.quantity * item.unitPrice,
-						0,
-					),
-				),
-				totalDiscountAmount: roundMoney(
-					recalculatedItems.reduce(
-						(sum, item) => sum + (item.discountAmount ?? 0),
-						0,
-					),
-				),
+				totalAmount: nextTotalAmount,
+				totalDiscountAmount: nextTotalDiscountAmount,
+				updatedAt: now,
 			});
 
 			repairedOrderCount += 1;
 			repairedOrderNumbers.push(order.orderNumber);
 		}
 
+		await ctx.db.insert("monthlyDiscountRecalculationLogs", {
+			periodKey: period.periodKey,
+			month: period.month,
+			year: period.year,
+			recalculatedBy,
+			completedOrderCount: completedOrders.length,
+			repairedOrderCount,
+			repairedItemCount,
+			createdAt: now,
+		});
+
 		return {
 			periodKey: period.periodKey,
+			recalculatedBy,
+			completedOrderCount: completedOrders.length,
 			repairedOrderCount,
 			repairedItemCount,
 			repairedOrderNumbers,
@@ -762,11 +843,17 @@ export const listDebts = query({
 						.query("employeeDiscountDebtPayments")
 						.withIndex("by_debt", (q) => q.eq("debtId", debt._id))
 						.collect();
+					const sortedPayments = payments.sort(
+						(left, right) =>
+							right.paymentDate - left.paymentDate ||
+							right.createdAt - left.createdAt,
+					);
 
 					return {
 						...debt,
 						calculation: calculationById.get(debt.calculationId) ?? null,
-						paymentCount: payments.length,
+						paymentCount: sortedPayments.length,
+						latestPayment: sortedPayments[0] ?? null,
 					};
 				}),
 		);
@@ -781,7 +868,11 @@ export const getDebtPayments = query({
 			.withIndex("by_debt", (q) => q.eq("debtId", args.debtId))
 			.collect();
 
-		return payments.sort((left, right) => right.paymentDate - left.paymentDate);
+		return payments.sort(
+			(left, right) =>
+				right.paymentDate - left.paymentDate ||
+				right.createdAt - left.createdAt,
+		);
 	},
 });
 
@@ -821,14 +912,18 @@ export const recordDebtPayment = mutation({
 		}
 
 		const now = Date.now();
-		const paidAmount = roundMoney(debt.paidAmount + args.amount);
-		const remainingAmount = roundMoney(debt.totalDebtAmount - paidAmount);
-		const paymentStatus =
-			remainingAmount <= 0 ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
+		const amount = roundMoney(args.amount);
+		const paidAmount = roundMoney(debt.paidAmount + amount);
+		const paymentSummary = summarizeDebtPayments(debt.totalDebtAmount, [
+			{
+				amount: paidAmount,
+				paymentDate: Math.max(debt.lastPaidAt ?? 0, args.paymentDate),
+			},
+		]);
 
 		const paymentId = await ctx.db.insert("employeeDiscountDebtPayments", {
 			debtId: debt._id,
-			amount: roundMoney(args.amount),
+			amount,
 			paymentDate: args.paymentDate,
 			paidBy,
 			notes: args.notes?.trim() ? args.notes.trim() : undefined,
@@ -837,8 +932,8 @@ export const recordDebtPayment = mutation({
 
 		await ctx.db.patch(debt._id, {
 			paidAmount,
-			remainingAmount,
-			paymentStatus,
+			remainingAmount: roundMoney(debt.totalDebtAmount - paidAmount),
+			paymentStatus: paymentSummary.paymentStatus,
 			lastPaidAt: Math.max(debt.lastPaidAt ?? 0, args.paymentDate),
 			updatedAt: now,
 		});
@@ -846,8 +941,86 @@ export const recordDebtPayment = mutation({
 		return {
 			paymentId,
 			paidAmount,
-			remainingAmount,
-			paymentStatus,
+			remainingAmount: roundMoney(debt.totalDebtAmount - paidAmount),
+			paymentStatus: paymentSummary.paymentStatus,
+		};
+	},
+});
+
+export const updateDebtPayment = mutation({
+	args: {
+		paymentId: v.id("employeeDiscountDebtPayments"),
+		amount: v.number(),
+		paymentDate: v.number(),
+		paidBy: v.string(),
+		notes: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const payment = await ctx.db.get(args.paymentId);
+		if (!payment) {
+			throw new ConvexError({ message: "Không tìm thấy thanh toán công nợ" });
+		}
+
+		const debt = await ctx.db.get(payment.debtId);
+		if (!debt) {
+			throw new ConvexError({ message: "Không tìm thấy công nợ chiết khấu" });
+		}
+
+		if (!Number.isFinite(args.amount) || args.amount <= 0) {
+			throw new ConvexError({ message: "Số tiền thanh toán phải lớn hơn 0" });
+		}
+
+		if (!Number.isFinite(args.paymentDate)) {
+			throw new ConvexError({ message: "Ngày thanh toán không hợp lệ" });
+		}
+
+		const paidBy = args.paidBy.trim();
+		if (!paidBy) {
+			throw new ConvexError({
+				message: "Vui lòng nhập người thực hiện thanh toán",
+			});
+		}
+
+		const existingPayments = await ctx.db
+			.query("employeeDiscountDebtPayments")
+			.withIndex("by_debt", (q) => q.eq("debtId", debt._id))
+			.collect();
+		const amount = roundMoney(args.amount);
+		const nextPayments = existingPayments.map((currentPayment) =>
+			currentPayment._id === payment._id
+				? { amount, paymentDate: args.paymentDate }
+				: {
+						amount: currentPayment.amount,
+						paymentDate: currentPayment.paymentDate,
+					},
+		);
+		const paymentSummary = summarizeDebtPayments(
+			debt.totalDebtAmount,
+			nextPayments,
+		);
+
+		const now = Date.now();
+		await ctx.db.patch(payment._id, {
+			amount,
+			paymentDate: args.paymentDate,
+			paidBy,
+			notes: args.notes?.trim() ? args.notes.trim() : undefined,
+			updatedAt: now,
+		});
+
+		await ctx.db.patch(debt._id, {
+			paidAmount: paymentSummary.paidAmount,
+			remainingAmount: paymentSummary.remainingAmount,
+			paymentStatus: paymentSummary.paymentStatus,
+			lastPaidAt: paymentSummary.lastPaidAt,
+			updatedAt: now,
+		});
+
+		return {
+			paymentId: payment._id,
+			paidAmount: paymentSummary.paidAmount,
+			remainingAmount: paymentSummary.remainingAmount,
+			paymentStatus: paymentSummary.paymentStatus,
 		};
 	},
 });

@@ -1,9 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { Calculator, Save, Search } from "lucide-react";
+import { Calculator, RefreshCw, Save, Search } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -136,6 +146,8 @@ function DiscountCalculationsPage() {
 	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 	const [savedBy, setSavedBy] = useState("");
 	const [notes, setNotes] = useState("");
+	const [isRecalculating, setIsRecalculating] = useState(false);
+	const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
 
 	const [yearText, monthText] = period.split("-");
 	const year = Number(yearText);
@@ -145,6 +157,10 @@ function DiscountCalculationsPage() {
 		month,
 		year,
 	});
+	const currentUser = useQuery(api.auth.getCurrentUser);
+	const repairMonthlySourceOrders = useMutation(
+		api.discountCalculations.repairMonthlySourceOrders,
+	);
 	const saveMonthly = useMutation(api.discountCalculations.saveMonthly);
 
 	const groupedRows = useMemo(() => {
@@ -257,6 +273,9 @@ function DiscountCalculationsPage() {
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
 
+	const formatDateTime = (timestamp: number) =>
+		new Date(timestamp).toLocaleString("vi-VN");
+
 	const formatPercentList = (percents: number[]) => {
 		if (percents.length === 0) return "-";
 
@@ -298,6 +317,42 @@ function DiscountCalculationsPage() {
 		}
 	};
 
+	const handleRecalculate = async () => {
+		setRecalculateDialogOpen(false);
+		setIsRecalculating(true);
+
+		try {
+			const result = await repairMonthlySourceOrders({
+				month,
+				year,
+				recalculatedBy:
+					currentUser?.name?.trim() || currentUser?.email?.trim() || "Không rõ",
+			});
+			const existingCalculationNotice = preview?.existingCalculation
+				? " Bảng tháng đã lưu chưa tự cập nhật, hãy lưu lại nếu cần chốt số mới."
+				: "";
+
+			if (result.repairedOrderCount === 0) {
+				toast.success(
+					`Đã rà ${result.completedOrderCount} đơn trong kỳ ${result.periodKey} nhưng không có đơn nào cần cập nhật.${existingCalculationNotice}`,
+				);
+				return;
+			}
+
+			toast.success(
+				`${result.recalculatedBy} đã tính lại ${result.repairedOrderCount} đơn và ${result.repairedItemCount} dòng chiết khấu trong kỳ ${result.periodKey}.${existingCalculationNotice}`,
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể tính lại chiết khấu cho các đơn hoàn thành",
+			);
+		} finally {
+			setIsRecalculating(false);
+		}
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -316,9 +371,20 @@ function DiscountCalculationsPage() {
 						className="w-full sm:w-[180px]"
 					/>
 					<Button
+						variant="outline"
+						onClick={() => setRecalculateDialogOpen(true)}
+						disabled={preview === undefined || isRecalculating}
+					>
+						<RefreshCw
+							className={`mr-2 h-4 w-4 ${isRecalculating ? "animate-spin" : ""}`}
+						/>
+						Tính lại chiết khấu
+					</Button>
+					<Button
 						onClick={() => setSaveDialogOpen(true)}
 						disabled={
 							preview === undefined ||
+							isRecalculating ||
 							preview.entries.length === 0 ||
 							preview.totals.unassignedTotalAmount > 0
 						}
@@ -374,6 +440,33 @@ function DiscountCalculationsPage() {
 						<Badge variant="secondary">
 							{preview.existingCalculation.periodKey}
 						</Badge>
+					</CardContent>
+				</Card>
+			) : null}
+
+			{preview && preview.recentRecalculations.length > 0 ? (
+				<Card className="border-slate-200 bg-slate-50/70">
+					<CardHeader>
+						<CardTitle>Lịch sử tính lại gần đây</CardTitle>
+					</CardHeader>
+					<CardContent className="space-y-3 text-sm">
+						{preview.recentRecalculations.map((log) => (
+							<div
+								key={log._id}
+								className="flex flex-col gap-1 rounded-md border bg-background/70 p-3 md:flex-row md:items-center md:justify-between"
+							>
+								<div>
+									<p className="font-medium text-foreground">
+										{log.recalculatedBy} - {formatDateTime(log.createdAt)}
+									</p>
+									<p className="text-muted-foreground">
+										Da ra {log.completedOrderCount} don, cap nhat{" "}
+										{log.repairedOrderCount} don / {log.repairedItemCount} dong.
+									</p>
+								</div>
+								<Badge variant="outline">{log.periodKey}</Badge>
+							</div>
+						))}
 					</CardContent>
 				</Card>
 			) : null}
@@ -593,6 +686,39 @@ function DiscountCalculationsPage() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
+			<AlertDialog
+				open={recalculateDialogOpen}
+				onOpenChange={setRecalculateDialogOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							Tính lại chiết khấu cho kỳ {period}?
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							Hệ thống sẽ lấy các đơn có trạng thái hoàn thành trong tháng đang
+							chọn, áp dụng chính sách chiết khấu đang hoạt động và ghi đè lại
+							chiết khấu trên từng dòng đơn hàng. Nếu tháng này đã có bảng chốt,
+							snapshot công nợ hiện tại sẽ không tự cập nhật.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={isRecalculating}>
+							Hủy
+						</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={handleRecalculate}
+							disabled={isRecalculating}
+						>
+							<RefreshCw
+								className={`mr-2 h-4 w-4 ${isRecalculating ? "animate-spin" : ""}`}
+							/>
+							Xác nhận tính lại
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

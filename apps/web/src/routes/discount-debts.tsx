@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import type { Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { History, Search, Wallet } from "lucide-react";
+import { History, Pencil, Search, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +44,7 @@ function DiscountDebtsPage() {
 	const [paymentStatus, setPaymentStatus] = useState("all");
 	const [search, setSearch] = useState("");
 	const [selectedDebtId, setSelectedDebtId] = useState<string | null>(null);
+	const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
 	const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
 	const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 	const [amount, setAmount] = useState("");
@@ -53,6 +54,7 @@ function DiscountDebtsPage() {
 	const [paidBy, setPaidBy] = useState("");
 	const [notes, setNotes] = useState("");
 
+	const currentUser = useQuery(api.auth.getCurrentUser);
 	const savedMonths = useQuery(api.discountCalculations.listSavedMonths, {});
 	const debts = useQuery(api.discountCalculations.listDebts, {
 		periodKey: periodKey === "all" ? undefined : periodKey,
@@ -70,6 +72,9 @@ function DiscountDebtsPage() {
 			: "skip",
 	);
 	const recordPayment = useMutation(api.discountCalculations.recordDebtPayment);
+	const updateDebtPayment = useMutation(
+		api.discountCalculations.updateDebtPayment,
+	);
 
 	const filteredDebts = useMemo(() => {
 		const keyword = search.trim().toLowerCase();
@@ -108,12 +113,40 @@ function DiscountDebtsPage() {
 		paid: "Đã thanh toán",
 	} as const;
 
+	const formatDateInputValue = (timestamp: number) => {
+		const date = new Date(timestamp);
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		return `${year}-${month}-${day}`;
+	};
+
+	const formatDateTime = (timestamp: number) =>
+		new Date(timestamp).toLocaleString("vi-VN");
+
 	const openPaymentDialog = (debtId: string) => {
 		setSelectedDebtId(debtId);
+		setEditingPaymentId(null);
 		setAmount("");
-		setPaidBy("");
+		setPaidBy(currentUser?.name ?? currentUser?.email ?? "");
 		setNotes("");
 		setPaymentDate(new Date().toISOString().slice(0, 10));
+		setPaymentDialogOpen(true);
+	};
+
+	const openEditPaymentDialog = (
+		debtId: string | null,
+		payment: NonNullable<typeof payments>[number],
+	) => {
+		if (!debtId) return;
+
+		setSelectedDebtId(debtId);
+		setEditingPaymentId(payment._id);
+		setAmount(String(payment.amount));
+		setPaidBy(payment.paidBy);
+		setNotes(payment.notes ?? "");
+		setPaymentDate(formatDateInputValue(payment.paymentDate));
+		setHistoryDialogOpen(false);
 		setPaymentDialogOpen(true);
 	};
 
@@ -122,24 +155,38 @@ function DiscountDebtsPage() {
 		setHistoryDialogOpen(true);
 	};
 
-	const handleRecordPayment = async () => {
+	const handleSubmitPayment = async () => {
 		if (!selectedDebt) return;
 
 		try {
-			await recordPayment({
-				debtId: selectedDebt._id as Id<"employeeDiscountDebts">,
-				amount: Number(amount),
-				paymentDate: new Date(paymentDate).getTime(),
-				paidBy,
-				notes: notes.trim() || undefined,
-			});
-			toast.success("Đã ghi nhận thanh toán công nợ chiết khấu");
+			if (editingPaymentId) {
+				await updateDebtPayment({
+					paymentId: editingPaymentId as Id<"employeeDiscountDebtPayments">,
+					amount: Number(amount),
+					paymentDate: new Date(paymentDate).getTime(),
+					paidBy,
+					notes: notes.trim() || undefined,
+				});
+				toast.success("Đã cập nhật thanh toán công nợ chiết khấu");
+			} else {
+				await recordPayment({
+					debtId: selectedDebt._id as Id<"employeeDiscountDebts">,
+					amount: Number(amount),
+					paymentDate: new Date(paymentDate).getTime(),
+					paidBy,
+					notes: notes.trim() || undefined,
+				});
+				toast.success("Đã ghi nhận thanh toán công nợ chiết khấu");
+			}
 			setPaymentDialogOpen(false);
+			setEditingPaymentId(null);
 		} catch (error) {
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Không thể ghi nhận thanh toán",
+					: editingPaymentId
+						? "Không thể cập nhật thanh toán"
+						: "Không thể ghi nhận thanh toán",
 			);
 		}
 	};
@@ -237,7 +284,7 @@ function DiscountDebtsPage() {
 									<TableHead className="text-right">Đã trả</TableHead>
 									<TableHead className="text-right">Còn lại</TableHead>
 									<TableHead className="text-center">Trạng thái</TableHead>
-									<TableHead className="text-center">Lịch sử</TableHead>
+									<TableHead>Chi tiết thanh toán</TableHead>
 									<TableHead className="text-right">Thao tác</TableHead>
 								</TableRow>
 							</TableHeader>
@@ -277,8 +324,15 @@ function DiscountDebtsPage() {
 												{statusLabel[debt.paymentStatus]}
 											</Badge>
 										</TableCell>
-										<TableCell className="text-center">
-											{debt.paymentCount}
+										<TableCell>
+											<div className="text-sm">
+												<p className="font-medium">{debt.paymentCount} lần</p>
+												<p className="text-muted-foreground text-xs">
+													{debt.latestPayment
+														? `Gần nhất ${new Date(debt.latestPayment.paymentDate).toLocaleDateString("vi-VN")} - ${formatCurrency(debt.latestPayment.amount)}`
+														: "Chưa có thanh toán"}
+												</p>
+											</div>
 										</TableCell>
 										<TableCell className="text-right">
 											<div className="flex justify-end gap-2">
@@ -311,7 +365,11 @@ function DiscountDebtsPage() {
 			<Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
 				<DialogContent className="sm:max-w-[520px]">
 					<DialogHeader>
-						<DialogTitle>Ghi nhận thanh toán công nợ</DialogTitle>
+						<DialogTitle>
+							{editingPaymentId
+								? "Sửa thanh toán công nợ"
+								: "Ghi nhận thanh toán công nợ"}
+						</DialogTitle>
 						<DialogDescription>
 							{selectedDebt?.salesmanNameSnapshot} - còn lại{" "}
 							{formatCurrency(selectedDebt?.remainingAmount ?? 0)}
@@ -356,11 +414,16 @@ function DiscountDebtsPage() {
 					<DialogFooter>
 						<Button
 							variant="outline"
-							onClick={() => setPaymentDialogOpen(false)}
+							onClick={() => {
+								setPaymentDialogOpen(false);
+								setEditingPaymentId(null);
+							}}
 						>
 							Hủy
 						</Button>
-						<Button onClick={handleRecordPayment}>Ghi nhận thanh toán</Button>
+						<Button onClick={handleSubmitPayment}>
+							{editingPaymentId ? "Lưu thay đổi" : "Ghi nhận thanh toán"}
+						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
@@ -383,32 +446,83 @@ function DiscountDebtsPage() {
 							Chưa có thanh toán nào.
 						</div>
 					) : (
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Ngày</TableHead>
-									<TableHead className="text-right">Số tiền</TableHead>
-									<TableHead>Người thực hiện</TableHead>
-									<TableHead>Ghi chú</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{payments.map((payment) => (
-									<TableRow key={payment._id}>
-										<TableCell>
-											{new Date(payment.paymentDate).toLocaleDateString(
-												"vi-VN",
-											)}
-										</TableCell>
-										<TableCell className="text-right font-medium text-teal-700">
-											{formatCurrency(payment.amount)}
-										</TableCell>
-										<TableCell>{payment.paidBy}</TableCell>
-										<TableCell>{payment.notes ?? "-"}</TableCell>
+						<div className="space-y-4">
+							<div className="grid gap-3 rounded-md border bg-muted/20 p-3 text-sm md:grid-cols-3">
+								<div>
+									<p className="text-muted-foreground text-xs">
+										Số lần thanh toán
+									</p>
+									<p className="font-semibold">{payments.length}</p>
+								</div>
+								<div>
+									<p className="text-muted-foreground text-xs">Đã thanh toán</p>
+									<p className="font-semibold text-teal-700">
+										{formatCurrency(selectedDebt?.paidAmount ?? 0)}
+									</p>
+								</div>
+								<div>
+									<p className="text-muted-foreground text-xs">Còn lại</p>
+									<p className="font-semibold text-rose-600">
+										{formatCurrency(selectedDebt?.remainingAmount ?? 0)}
+									</p>
+								</div>
+							</div>
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Ngày</TableHead>
+										<TableHead className="text-right">Số tiền</TableHead>
+										<TableHead>Người thực hiện</TableHead>
+										<TableHead>Ghi chú</TableHead>
+										<TableHead>Chi tiết</TableHead>
+										<TableHead className="text-right">Thao tác</TableHead>
 									</TableRow>
-								))}
-							</TableBody>
-						</Table>
+								</TableHeader>
+								<TableBody>
+									{payments.map((payment) => (
+										<TableRow key={payment._id}>
+											<TableCell>
+												<div>
+													<p>
+														{new Date(payment.paymentDate).toLocaleDateString(
+															"vi-VN",
+														)}
+													</p>
+													<p className="text-muted-foreground text-xs">
+														Ghi nhận {formatDateTime(payment.createdAt)}
+													</p>
+												</div>
+											</TableCell>
+											<TableCell className="text-right font-medium text-teal-700">
+												{formatCurrency(payment.amount)}
+											</TableCell>
+											<TableCell>{payment.paidBy}</TableCell>
+											<TableCell>{payment.notes ?? "-"}</TableCell>
+											<TableCell className="text-muted-foreground text-xs">
+												{payment.updatedAt
+													? `Cập nhật ${formatDateTime(payment.updatedAt)}`
+													: "Bản gốc"}
+											</TableCell>
+											<TableCell className="text-right">
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() =>
+														openEditPaymentDialog(
+															selectedDebt?._id ?? null,
+															payment,
+														)
+													}
+												>
+													<Pencil className="mr-2 h-4 w-4" />
+													Sửa
+												</Button>
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</div>
 					)}
 				</DialogContent>
 			</Dialog>

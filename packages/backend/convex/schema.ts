@@ -329,6 +329,19 @@ export default defineSchema({
 		.index("by_salesman", ["salesmanId"])
 		.index("by_period_key", ["periodKey"]),
 
+	monthlyDiscountRecalculationLogs: defineTable({
+		periodKey: v.string(),
+		month: v.number(),
+		year: v.number(),
+		recalculatedBy: v.string(),
+		completedOrderCount: v.number(),
+		repairedOrderCount: v.number(),
+		repairedItemCount: v.number(),
+		createdAt: v.number(),
+	})
+		.index("by_period_key", ["periodKey"])
+		.index("by_period_key_and_createdAt", ["periodKey", "createdAt"]),
+
 	employeeDiscountDebts: defineTable({
 		calculationId: v.id("monthlyDiscountCalculations"),
 		periodKey: v.string(),
@@ -361,6 +374,7 @@ export default defineSchema({
 		paidBy: v.string(),
 		notes: v.optional(v.string()),
 		createdAt: v.number(),
+		updatedAt: v.optional(v.number()),
 	}).index("by_debt", ["debtId"]),
 
 	// Sales Order Status Logs
