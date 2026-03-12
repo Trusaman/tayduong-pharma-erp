@@ -476,10 +476,9 @@ function DiscountCalculationsPage() {
 								variant="destructive"
 								size="sm"
 								onClick={() => setDeleteDialogOpen(true)}
-								disabled={existingCalculationPaymentCount > 0}
 							>
 								<Trash2 className="mr-2 h-4 w-4" />
-								Xóa công nợ
+								Xóa công nợ theo tháng
 							</Button>
 						</div>
 					</CardContent>
@@ -769,22 +768,18 @@ function DiscountCalculationsPage() {
 							Xóa bảng công nợ tháng {period}?
 						</AlertDialogTitle>
 						<AlertDialogDescription>
-							{existingCalculationPaymentCount > 0
-								? `Bảng tháng này hiện có ${existingCalculationDebtCount} công nợ và ${existingCalculationPaymentCount} thanh toán đã ghi nhận, nên hệ thống sẽ không cho xóa để tránh mất lịch sử đối soát.`
-								: `Thao tác này sẽ xóa snapshot công nợ đã lưu và ${existingCalculationDebtCount} công nợ trong tháng. Sau khi xóa, bạn có thể lưu lại bảng công nợ mới từ dữ liệu đã tính lại.`}
+							{`Cảnh báo: thao tác này sẽ xóa toàn bộ snapshot công nợ của kỳ ${preview?.existingCalculation?.periodKey}, gồm ${existingCalculationDebtCount} công nợ và ${existingCalculationPaymentCount} thanh toán đã ghi nhận. Dữ liệu công nợ tháng này sẽ bị xóa vĩnh viễn để bạn có thể lưu lại bảng mới từ dữ liệu đã tính lại.`}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Hủy</AlertDialogCancel>
-						{existingCalculationPaymentCount > 0 ? null : (
-							<AlertDialogAction
-								className="bg-destructive text-destructive-foreground"
-								onClick={handleDeleteMonthlyCalculation}
-							>
-								<Trash2 className="mr-2 h-4 w-4" />
-								Xóa công nợ
-							</AlertDialogAction>
-						)}
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground"
+							onClick={handleDeleteMonthlyCalculation}
+						>
+							<Trash2 className="mr-2 h-4 w-4" />
+							Xóa công nợ theo tháng
+						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>

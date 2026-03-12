@@ -2,9 +2,26 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import type { Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { FileText, History, Pencil, Search, Wallet } from "lucide-react";
+import {
+	FileText,
+	History,
+	Pencil,
+	Search,
+	Trash2,
+	Wallet,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +63,17 @@ const discountBadgeLabels = {
 	CTV: "CTV",
 	Salesman: "NT, KD",
 	Manager: "Quản lý",
+} as const;
+
+const periodFilterLabels = {
+	all: "Tất cả kỳ",
+} as const;
+
+const paymentStatusLabels = {
+	all: "Tất cả trạng thái",
+	unpaid: "Chưa thanh toán",
+	partial: "Thanh toán một phần",
+	paid: "Đã thanh toán",
 } as const;
 
 type DiscountTypeKey = keyof typeof discountBadgeLabels;
@@ -98,6 +126,8 @@ function DiscountDebtsPage() {
 	const [selectedDebtId, setSelectedDebtId] = useState<string | null>(null);
 	const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 	const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+	const [isDeletingMonth, setIsDeletingMonth] = useState(false);
 	const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 	const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
 	const [paymentHistoryDialogOpen, setPaymentHistoryDialogOpen] =
@@ -111,6 +141,8 @@ function DiscountDebtsPage() {
 
 	const currentUser = useQuery(api.auth.getCurrentUser);
 	const savedMonths = useQuery(api.discountCalculations.listSavedMonths, {});
+	const selectedCalculation =
+		savedMonths?.find((month) => month.periodKey === periodKey) ?? null;
 	const debts = useQuery(api.discountCalculations.listDebts, {
 		periodKey: periodKey === "all" ? undefined : periodKey,
 		paymentStatus:
@@ -145,6 +177,18 @@ function DiscountDebtsPage() {
 	);
 	const updateDebtOrderPayment = useMutation(
 		api.discountCalculations.updateDebtOrderPayment,
+	);
+	const deleteMonthlyCalculation = useMutation(
+		api.discountCalculations.deleteMonthlyCalculation,
+	);
+	const selectedMonthDebts = useQuery(
+		api.discountCalculations.listDebts,
+		selectedCalculation
+			? {
+					periodKey: selectedCalculation.periodKey,
+					paymentStatus: undefined,
+				}
+			: "skip",
 	);
 
 	const filteredDebts = useMemo(() => {
@@ -192,13 +236,20 @@ function DiscountDebtsPage() {
 	};
 
 	const statusLabel = {
-		unpaid: "Chưa thanh toán",
-		partial: "Thanh toán một phần",
-		paid: "Đã thanh toán",
+		unpaid: paymentStatusLabels.unpaid,
+		partial: paymentStatusLabels.partial,
+		paid: paymentStatusLabels.paid,
 	} as const;
 
 	const canManageOrderPayments =
 		(debtOrderDetails?.legacyPaymentCount ?? 0) === 0;
+	const selectedMonthDebtCount = selectedMonthDebts?.length ?? 0;
+	const selectedMonthPaymentCount =
+		selectedMonthDebts?.reduce((sum, debt) => sum + debt.paymentCount, 0) ?? 0;
+	const isCheckingMonthPayments =
+		Boolean(selectedCalculation) && selectedMonthDebts === undefined;
+	const canDeleteSelectedMonth =
+		Boolean(selectedCalculation) && !isDeletingMonth;
 
 	const openDebtDetailDialog = (debtId: string) => {
 		setSelectedDebtId(debtId);
@@ -291,6 +342,34 @@ function DiscountDebtsPage() {
 		}
 	};
 
+	const handleDeleteMonthlyDebt = async () => {
+		if (!selectedCalculation) return;
+		setIsDeletingMonth(true);
+
+		try {
+			const result = await deleteMonthlyCalculation({
+				calculationId: selectedCalculation._id,
+			});
+			toast.success(`Đã xóa công nợ tháng ${result.periodKey}`);
+			setDeleteDialogOpen(false);
+			setDetailDialogOpen(false);
+			setPaymentDialogOpen(false);
+			setPaymentHistoryDialogOpen(false);
+			setSelectedDebtId(null);
+			setSelectedOrderId(null);
+			setEditingPaymentId(null);
+			setPeriodKey("all");
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa công nợ theo tháng",
+			);
+		} finally {
+			setIsDeletingMonth(false);
+		}
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -303,54 +382,88 @@ function DiscountDebtsPage() {
 						người nhận.
 					</p>
 				</div>
-				<div className="grid gap-2 sm:grid-cols-3">
-					<Select
-						value={periodKey}
-						onValueChange={(value) => value && setPeriodKey(value)}
-					>
-						<SelectTrigger className="w-full sm:w-[180px]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">Tất cả kỳ</SelectItem>
-							{savedMonths?.map((month) => (
-								<SelectItem key={month._id} value={month.periodKey}>
-									{month.periodKey}
+				<div className="flex flex-col gap-2 lg:items-end">
+					<div className="grid gap-2 sm:grid-cols-3">
+						<Select
+							value={periodKey}
+							onValueChange={(value) => value && setPeriodKey(value)}
+						>
+							<SelectTrigger className="w-full sm:w-[180px]">
+								<SelectValue placeholder={periodFilterLabels.all}>
+									{periodKey === "all" ? periodFilterLabels.all : periodKey}
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Tất cả kỳ</SelectItem>
+								{savedMonths?.map((month) => (
+									<SelectItem key={month._id} value={month.periodKey}>
+										{month.periodKey}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Select
+							value={paymentStatus}
+							onValueChange={(value) => value && setPaymentStatus(value)}
+						>
+							<SelectTrigger className="w-full sm:w-[200px]">
+								<SelectValue placeholder={paymentStatusLabels.all}>
+									{
+										paymentStatusLabels[
+											paymentStatus as keyof typeof paymentStatusLabels
+										]
+									}
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">{paymentStatusLabels.all}</SelectItem>
+								<SelectItem value="unpaid">
+									{paymentStatusLabels.unpaid}
 								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<Select
-						value={paymentStatus}
-						onValueChange={(value) => value && setPaymentStatus(value)}
-					>
-						<SelectTrigger className="w-full sm:w-[200px]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">Tất cả trạng thái</SelectItem>
-							<SelectItem value="unpaid">Chưa thanh toán</SelectItem>
-							<SelectItem value="partial">Thanh toán một phần</SelectItem>
-							<SelectItem value="paid">Đã thanh toán</SelectItem>
-						</SelectContent>
-					</Select>
-					<div className="relative w-full sm:w-[240px]">
-						<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-						<Input
-							placeholder="Tìm người nhận hoặc kỳ..."
-							value={search}
-							onChange={(event) => setSearch(event.target.value)}
-							className="pl-8"
-						/>
+								<SelectItem value="partial">
+									{paymentStatusLabels.partial}
+								</SelectItem>
+								<SelectItem value="paid">{paymentStatusLabels.paid}</SelectItem>
+							</SelectContent>
+						</Select>
+						<div className="relative w-full sm:w-[240px]">
+							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+							<Input
+								placeholder="Tìm người nhận hoặc kỳ..."
+								value={search}
+								onChange={(event) => setSearch(event.target.value)}
+								className="pl-8"
+							/>
+						</div>
 					</div>
+					{selectedCalculation ? (
+						<Button
+							variant="destructive"
+							size="sm"
+							onClick={() => setDeleteDialogOpen(true)}
+							disabled={isDeletingMonth}
+						>
+							<Trash2 className="mr-2 h-4 w-4" />
+							Xóa công nợ theo tháng
+						</Button>
+					) : null}
 				</div>
 			</div>
 
 			<div className="grid gap-4 md:grid-cols-3">
 				{[
-					{ label: "Tổng phải chi", value: formatCurrency(stats.totalDebt) },
-					{ label: "Đã thanh toán", value: formatCurrency(stats.totalPaid) },
-					{ label: "Còn lại", value: formatCurrency(stats.totalRemaining) },
+					{
+						label: "Tổng phải chi",
+						value: formatCurrency(stats.totalDebt),
+					},
+					{
+						label: "Đã thanh toán",
+						value: formatCurrency(stats.totalPaid),
+					},
+					{
+						label: "Còn lại",
+						value: formatCurrency(stats.totalRemaining),
+					},
 				].map((stat) => (
 					<Card key={stat.label}>
 						<CardContent className="p-4">
@@ -466,7 +579,7 @@ function DiscountDebtsPage() {
 			</Card>
 
 			<Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-				<DialogContent className="sm:max-w-[1100px]">
+				<DialogContent className="sm:max-w-[1300px]">
 					<DialogHeader>
 						<DialogTitle>Chi tiết công nợ theo đơn hàng</DialogTitle>
 						<DialogDescription>
@@ -499,7 +612,10 @@ function DiscountDebtsPage() {
 
 							<div className="grid gap-3 md:grid-cols-4">
 								{[
-									{ label: "Số đơn", value: debtOrderDetails.orders.length },
+									{
+										label: "Số đơn",
+										value: debtOrderDetails.orders.length,
+									},
 									{
 										label: "Tổng phải chi",
 										value: formatCurrency(selectedDebt?.totalDebtAmount ?? 0),
@@ -824,6 +940,38 @@ function DiscountDebtsPage() {
 					)}
 				</DialogContent>
 			</Dialog>
+
+			<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							Xóa công nợ tháng {selectedCalculation?.periodKey}?
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							{isCheckingMonthPayments
+								? `Đang kiểm tra dữ liệu của kỳ ${selectedCalculation?.periodKey}... Nếu tiếp tục, hệ thống sẽ xóa toàn bộ công nợ tháng này kể cả lịch sử thanh toán.`
+								: `Cảnh báo: thao tác này sẽ xóa toàn bộ snapshot công nợ của kỳ ${selectedCalculation?.periodKey}, gồm ${selectedMonthDebtCount} công nợ và ${selectedMonthPaymentCount} thanh toán đã ghi nhận. Dữ liệu công nợ tháng này sẽ bị xóa vĩnh viễn để bạn có thể lưu lại bảng mới từ phần Tính chiết khấu.`}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={isDeletingMonth}>
+							Hủy
+						</AlertDialogCancel>
+						{canDeleteSelectedMonth ? (
+							<AlertDialogAction
+								className="bg-destructive text-destructive-foreground"
+								onClick={(event) => {
+									event.preventDefault();
+									void handleDeleteMonthlyDebt();
+								}}
+							>
+								<Trash2 className="mr-2 h-4 w-4" />
+								{isDeletingMonth ? "Đang xóa..." : "Xóa công nợ theo tháng"}
+							</AlertDialogAction>
+						) : null}
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

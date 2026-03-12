@@ -1512,19 +1512,21 @@ export const deleteMonthlyCalculation = mutation({
 				)
 				.collect(),
 		]);
-		const paymentSummary = await getCalculationPaymentSummary(
-			ctx,
-			calculation._id,
-		);
-
-		if (paymentSummary.totalPaymentCount > 0) {
-			throw new ConvexError({
-				message:
-					"Bảng công nợ này đã có thanh toán, không thể xóa. Hãy đối soát hoặc tạo kỳ mới thay vì xóa snapshot hiện tại.",
-			});
-		}
 
 		for (const debt of debts) {
+			const [legacyPayments, orderPayments] = await Promise.all([
+				getLegacyDebtPayments(ctx, debt._id),
+				getDebtOrderPayments(ctx, debt._id),
+			]);
+
+			for (const payment of legacyPayments) {
+				await ctx.db.delete(payment._id);
+			}
+
+			for (const payment of orderPayments) {
+				await ctx.db.delete(payment._id);
+			}
+
 			await ctx.db.delete(debt._id);
 		}
 
