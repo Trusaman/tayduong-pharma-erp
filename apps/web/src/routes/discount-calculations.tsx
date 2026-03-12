@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { Calculator, Save, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,14 +31,99 @@ export const Route = createFileRoute("/discount-calculations")({
 	component: DiscountCalculationsPage,
 });
 
-const discountTypeLabels = {
+const discountColumnGroups = [
+	{
+		key: "doctor",
+		label: "Chiết khấu BS",
+		entryTypes: ["Doctor"],
+	},
+	{
+		key: "sales",
+		label: "Chiết khấu NT, KD",
+		entryTypes: ["hospital", "Salesman"],
+	},
+	{
+		key: "payment",
+		label: "Chiết khấu thanh toán",
+		entryTypes: ["payment"],
+	},
+	{
+		key: "ctv",
+		label: "Chiết khấu CTV",
+		entryTypes: ["CTV"],
+	},
+	{
+		key: "manager",
+		label: "Chiết khấu Quản lý",
+		entryTypes: ["Manager"],
+	},
+] as const;
+
+const discountBadgeLabels = {
 	Doctor: "BS",
 	hospital: "NT, KD",
 	payment: "Thanh toán",
 	CTV: "CTV",
-	Salesman: "Salesman",
+	Salesman: "NT, KD",
 	Manager: "Quản lý",
 } as const;
+
+type DiscountColumnGroupKey = (typeof discountColumnGroups)[number]["key"];
+
+type GroupedDiscountCell = {
+	recipients: string[];
+	percents: number[];
+	amount: number;
+};
+
+type GroupedOrderRow = {
+	key: string;
+	completedAt: number;
+	orderNumber: string;
+	customerName: string;
+	revenueAmount: number;
+	totalDiscountAmount: number;
+	columns: Record<DiscountColumnGroupKey, GroupedDiscountCell>;
+	searchIndex: string;
+};
+
+const discountColumnKeyByType = {
+	Doctor: "doctor",
+	hospital: "sales",
+	payment: "payment",
+	CTV: "ctv",
+	Salesman: "sales",
+	Manager: "manager",
+} as const;
+
+function createEmptyDiscountColumns(): Record<
+	DiscountColumnGroupKey,
+	GroupedDiscountCell
+> {
+	return {
+		doctor: { recipients: [], percents: [], amount: 0 },
+		sales: { recipients: [], percents: [], amount: 0 },
+		payment: { recipients: [], percents: [], amount: 0 },
+		ctv: { recipients: [], percents: [], amount: 0 },
+		manager: { recipients: [], percents: [], amount: 0 },
+	};
+}
+
+function addUniqueString(values: string[], value: string) {
+	if (!value || values.includes(value)) {
+		return;
+	}
+
+	values.push(value);
+}
+
+function addUniqueNumber(values: number[], value: number) {
+	if (values.some((current) => Math.abs(current - value) < 0.001)) {
+		return;
+	}
+
+	values.push(value);
+}
 
 function getCurrentMonthValue() {
 	const now = new Date();
@@ -62,21 +147,105 @@ function DiscountCalculationsPage() {
 	});
 	const saveMonthly = useMutation(api.discountCalculations.saveMonthly);
 
-	const filteredEntries = useMemo(() => {
-		const keyword = search.trim().toLowerCase();
+	const groupedRows = useMemo(() => {
 		if (!preview?.entries) return [];
-		if (!keyword) return preview.entries;
 
-		return preview.entries.filter((entry) =>
-			[
-				entry.orderNumber,
-				entry.salesmanName,
-				entry.customerName,
-				entry.productName,
-				entry.ruleName,
-			].some((value) => value.toLowerCase().includes(keyword)),
-		);
-	}, [preview?.entries, search]);
+		const rows = new Map<
+			string,
+			Omit<GroupedOrderRow, "searchIndex"> & { itemIds: Set<string> }
+		>();
+
+		for (const entry of preview.entries) {
+			const rowKey = String(entry.salesOrderId);
+			const columnKey = discountColumnKeyByType[entry.discountType];
+			const existing = rows.get(rowKey);
+
+			if (existing) {
+				existing.completedAt = Math.max(
+					existing.completedAt,
+					entry.completedAt,
+				);
+
+				if (!existing.itemIds.has(String(entry.salesOrderItemId))) {
+					existing.revenueAmount += entry.revenueAmount;
+					existing.itemIds.add(String(entry.salesOrderItemId));
+				}
+
+				existing.totalDiscountAmount += entry.discountAmount;
+
+				const cell = existing.columns[columnKey];
+				addUniqueString(cell.recipients, entry.salesmanName);
+				addUniqueNumber(cell.percents, entry.allocatedPercent);
+				cell.amount += entry.discountAmount;
+				continue;
+			}
+
+			const columns = createEmptyDiscountColumns();
+			columns[columnKey] = {
+				recipients: [entry.salesmanName],
+				percents: [entry.allocatedPercent],
+				amount: entry.discountAmount,
+			};
+
+			rows.set(rowKey, {
+				key: rowKey,
+				completedAt: entry.completedAt,
+				orderNumber: entry.orderNumber,
+				customerName: entry.customerName,
+				revenueAmount: entry.revenueAmount,
+				totalDiscountAmount: entry.discountAmount,
+				columns,
+				itemIds: new Set([String(entry.salesOrderItemId)]),
+			});
+		}
+
+		return Array.from(rows.values())
+			.map((row) => ({
+				...row,
+				revenueAmount: Number(row.revenueAmount.toFixed(2)),
+				totalDiscountAmount: Number(row.totalDiscountAmount.toFixed(2)),
+				columns: Object.fromEntries(
+					Object.entries(row.columns).map(([key, cell]) => [
+						key,
+						{
+							...cell,
+							amount: Number(cell.amount.toFixed(2)),
+							percents: [...cell.percents].sort((left, right) => left - right),
+							recipients: [...cell.recipients].sort((left, right) =>
+								left.localeCompare(right, "vi"),
+							),
+						},
+					]),
+				) as Record<DiscountColumnGroupKey, GroupedDiscountCell>,
+				searchIndex: [
+					row.orderNumber,
+					row.customerName,
+					...discountColumnGroups.flatMap((group) => {
+						const cell = row.columns[group.key];
+						return [
+							...cell.recipients,
+							...cell.percents.map((percent) => String(percent)),
+						];
+					}),
+				]
+					.join(" ")
+					.toLowerCase(),
+			}))
+			.sort((left, right) => {
+				if (right.completedAt !== left.completedAt) {
+					return right.completedAt - left.completedAt;
+				}
+
+				return right.totalDiscountAmount - left.totalDiscountAmount;
+			});
+	}, [preview?.entries]);
+
+	const filteredRows = useMemo(() => {
+		const keyword = search.trim().toLowerCase();
+		if (!keyword) return groupedRows;
+
+		return groupedRows.filter((row) => row.searchIndex.includes(keyword));
+	}, [groupedRows, search]);
 
 	const formatCurrency = (amount: number) =>
 		new Intl.NumberFormat("vi-VN", {
@@ -87,6 +256,24 @@ function DiscountCalculationsPage() {
 
 	const formatDate = (timestamp: number) =>
 		new Date(timestamp).toLocaleDateString("vi-VN");
+
+	const formatPercentList = (percents: number[]) => {
+		if (percents.length === 0) return "-";
+
+		return percents
+			.map(
+				(percent) =>
+					`${percent.toLocaleString("vi-VN", {
+						maximumFractionDigits: 2,
+					})}%`,
+			)
+			.join(" / ");
+	};
+
+	const formatRecipientList = (recipients: string[]) => {
+		if (recipients.length === 0) return "-";
+		return recipients.join(", ");
+	};
 
 	const handleSave = async () => {
 		try {
@@ -254,8 +441,8 @@ function DiscountCalculationsPage() {
 															variant="outline"
 														>
 															{
-																discountTypeLabels[
-																	type as keyof typeof discountTypeLabels
+																discountBadgeLabels[
+																	type as keyof typeof discountBadgeLabels
 																]
 															}
 															: {formatCurrency(amount)}
@@ -294,51 +481,71 @@ function DiscountCalculationsPage() {
 						<div className="py-8 text-center text-muted-foreground">
 							Đang tải dữ liệu...
 						</div>
-					) : filteredEntries.length === 0 ? (
+					) : filteredRows.length === 0 ? (
 						<div className="py-8 text-center text-muted-foreground">
-							Không có dòng phù hợp.
+							Không có đơn hàng phù hợp.
 						</div>
 					) : (
 						<Table>
 							<TableHeader>
 								<TableRow>
-									<TableHead>Ngày hoàn thành</TableHead>
-									<TableHead>Số đơn</TableHead>
-									<TableHead>Người nhận</TableHead>
-									<TableHead>Khách hàng</TableHead>
-									<TableHead>Sản phẩm</TableHead>
-									<TableHead>Loại CK</TableHead>
-									<TableHead className="text-right">% phân bổ</TableHead>
-									<TableHead className="text-right">Số CK</TableHead>
+									<TableHead rowSpan={2}>Ngày hoàn thành</TableHead>
+									<TableHead rowSpan={2}>Số đơn</TableHead>
+									<TableHead rowSpan={2}>Khách hàng</TableHead>
+									<TableHead rowSpan={2} className="text-right">
+										Giá trị đơn
+									</TableHead>
+									{discountColumnGroups.map((group) => (
+										<TableHead
+											key={group.key}
+											colSpan={2}
+											className="text-center"
+										>
+											{group.label}
+										</TableHead>
+									))}
+									<TableHead rowSpan={2} className="text-right">
+										Tổng chiết khấu
+									</TableHead>
+								</TableRow>
+								<TableRow>
+									{discountColumnGroups.map((group) => (
+										<Fragment key={`${group.key}-subcolumns`}>
+											<TableHead className="text-center">Tỷ lệ</TableHead>
+											<TableHead>Người nhận</TableHead>
+										</Fragment>
+									))}
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{filteredEntries.map((entry) => (
-									<TableRow
-										key={`${entry.salesOrderItemId}-${entry.salesmanId}-${entry.discountType}`}
-									>
-										<TableCell>{formatDate(entry.completedAt)}</TableCell>
+								{filteredRows.map((row) => (
+									<TableRow key={row.key}>
+										<TableCell>{formatDate(row.completedAt)}</TableCell>
 										<TableCell className="font-mono text-xs">
-											{entry.orderNumber}
+											{row.orderNumber}
 										</TableCell>
 										<TableCell className="font-medium">
-											{entry.salesmanName}
+											{row.customerName}
 										</TableCell>
-										<TableCell>{entry.customerName}</TableCell>
-										<TableCell>{entry.productName}</TableCell>
-										<TableCell>
-											<Badge variant="secondary">
-												{discountTypeLabels[entry.discountType]}
-											</Badge>
+										<TableCell className="text-right font-medium">
+											{formatCurrency(row.revenueAmount)}
 										</TableCell>
-										<TableCell className="text-right">
-											{entry.allocatedPercent.toLocaleString("vi-VN", {
-												maximumFractionDigits: 2,
-											})}
-											%
-										</TableCell>
+										{discountColumnGroups.map((group) => {
+											const cell = row.columns[group.key];
+
+											return (
+												<Fragment key={`${row.key}-${group.key}`}>
+													<TableCell className="text-center text-xs">
+														{formatPercentList(cell.percents)}
+													</TableCell>
+													<TableCell className="max-w-[180px] whitespace-normal text-xs">
+														{formatRecipientList(cell.recipients)}
+													</TableCell>
+												</Fragment>
+											);
+										})}
 										<TableCell className="text-right font-medium text-teal-700">
-											{formatCurrency(entry.discountAmount)}
+											{formatCurrency(row.totalDiscountAmount)}
 										</TableCell>
 									</TableRow>
 								))}
