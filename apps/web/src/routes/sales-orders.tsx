@@ -12,7 +12,7 @@ import {
 	Truck,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,13 +50,27 @@ export const Route = createFileRoute("/sales-orders")({
 });
 
 interface OrderItem {
+	rowId: string;
 	productId: string;
 	quantity: string;
 	unitPrice: string;
 	discountPercent: string;
+	hasManualDiscount: boolean;
 }
 
-const initialItem: OrderItem = { productId: "", quantity: "1", unitPrice: "", discountPercent: "" };
+let orderItemSequence = 0;
+
+function createOrderItem(): OrderItem {
+	orderItemSequence += 1;
+	return {
+		rowId: `order-item-${orderItemSequence}`,
+		productId: "",
+		quantity: "1",
+		unitPrice: "",
+		discountPercent: "",
+		hasManualDiscount: false,
+	};
+}
 
 function SalesOrdersPage() {
 	const [search, setSearch] = useState("");
@@ -66,7 +80,7 @@ function SalesOrdersPage() {
 	const [customerId, setCustomerId] = useState("");
 	const [salesmanId, setSalesmanId] = useState("");
 	const [notes, setNotes] = useState("");
-	const [items, setItems] = useState<OrderItem[]>([initialItem]);
+	const [items, setItems] = useState<OrderItem[]>(() => [createOrderItem()]);
 
 	// Status‑change dialog state
 	const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -89,10 +103,10 @@ function SalesOrdersPage() {
 		api.discounts.getApplicableForOrder,
 		customerId && salesmanId && selectedProductIds.length > 0
 			? {
-				customerId: customerId as Id<"customers">,
-				salesmanId: salesmanId as Id<"salesmen">,
-				productIds: selectedProductIds,
-			}
+					customerId: customerId as Id<"customers">,
+					salesmanId: salesmanId as Id<"salesmen">,
+					productIds: selectedProductIds,
+				}
 			: "skip",
 	);
 	const orderDetails = useQuery(
@@ -117,7 +131,7 @@ function SalesOrdersPage() {
 	);
 
 	const handleAddItem = () => {
-		setItems([...items, { ...initialItem }]);
+		setItems([...items, createOrderItem()]);
 	};
 
 	const handleRemoveItem = (index: number) => {
@@ -135,6 +149,37 @@ function SalesOrdersPage() {
 		newItems[index] = { ...newItems[index], [field]: value };
 		setItems(newItems);
 	};
+
+	useEffect(() => {
+		if (!applicableDiscounts) {
+			return;
+		}
+
+		setItems((currentItems) => {
+			let hasChanges = false;
+			const nextItems = currentItems.map((item) => {
+				if (!item.productId || item.hasManualDiscount) {
+					return item;
+				}
+
+				const autoDiscount = applicableDiscounts[item.productId]?.totalPercent;
+				const nextDiscountPercent =
+					typeof autoDiscount === "number" ? String(autoDiscount) : "";
+
+				if (item.discountPercent === nextDiscountPercent) {
+					return item;
+				}
+
+				hasChanges = true;
+				return {
+					...item,
+					discountPercent: nextDiscountPercent,
+				};
+			});
+
+			return hasChanges ? nextItems : currentItems;
+		});
+	}, [applicableDiscounts]);
 
 	const handleCreateOrder = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -155,7 +200,7 @@ function SalesOrdersPage() {
 					quantity: Number(item.quantity),
 					unitPrice: Number(item.unitPrice),
 					manualDiscountPercent:
-						item.discountPercent !== ""
+						item.hasManualDiscount && item.discountPercent !== ""
 							? Number(item.discountPercent)
 							: undefined,
 				})),
@@ -189,10 +234,9 @@ function SalesOrdersPage() {
 				status: pendingStatusChange.toStatus,
 				changedByName,
 				comment: statusComment || undefined,
-				deliveryEmployeeId:
-					deliveryEmployeeId
-						? (deliveryEmployeeId as Id<"employees">)
-						: undefined,
+				deliveryEmployeeId: deliveryEmployeeId
+					? (deliveryEmployeeId as Id<"employees">)
+					: undefined,
 			});
 			toast.success("Đã cập nhật trạng thái đơn");
 			setStatusDialogOpen(false);
@@ -220,7 +264,15 @@ function SalesOrdersPage() {
 		setCustomerId("");
 		setSalesmanId("");
 		setNotes("");
-		setItems([initialItem]);
+		setItems([createOrderItem()]);
+	};
+
+	const getAutoDiscountPercent = (productId: string) => {
+		if (!productId) {
+			return undefined;
+		}
+
+		return applicableDiscounts?.[productId]?.totalPercent;
 	};
 
 	const formatCurrency = (amount: number) => {
@@ -274,7 +326,6 @@ function SalesOrdersPage() {
 		return map[status] ?? status;
 	};
 
-
 	const viewOrderDetails = (orderId: string) => {
 		setSelectedOrderId(orderId);
 		setDetailDialogOpen(true);
@@ -316,7 +367,8 @@ function SalesOrdersPage() {
 											<SelectTrigger>
 												<SelectValue placeholder="Chọn khách hàng">
 													{customerId
-														? (customers?.find((c) => c._id === customerId)?.name ?? "Chọn khách hàng")
+														? (customers?.find((c) => c._id === customerId)
+																?.name ?? "Chọn khách hàng")
 														: "Chọn khách hàng"}
 												</SelectValue>
 											</SelectTrigger>
@@ -339,7 +391,8 @@ function SalesOrdersPage() {
 											<SelectTrigger>
 												<SelectValue placeholder="Chọn nhân viên">
 													{salesmanId
-														? (salesmen?.find((s) => s._id === salesmanId)?.name ?? "Chọn nhân viên")
+														? (salesmen?.find((s) => s._id === salesmanId)
+																?.name ?? "Chọn nhân viên")
 														: "Chọn nhân viên"}
 												</SelectValue>
 											</SelectTrigger>
@@ -368,17 +421,24 @@ function SalesOrdersPage() {
 									</div>
 									{/* Header labels */}
 									<div className="grid grid-cols-12 gap-2 px-1">
-										<div className="col-span-4 text-muted-foreground text-xs font-medium">Sản phẩm</div>
-										<div className="col-span-2 text-muted-foreground text-xs font-medium">Số lượng</div>
-										<div className="col-span-2 text-muted-foreground text-xs font-medium">Đơn giá</div>
-										<div className="col-span-2 text-muted-foreground text-xs font-medium">%CK</div>
-										<div className="col-span-2 text-muted-foreground text-xs font-medium text-right">Thành tiền</div>
+										<div className="col-span-4 font-medium text-muted-foreground text-xs">
+											Sản phẩm
+										</div>
+										<div className="col-span-2 font-medium text-muted-foreground text-xs">
+											Số lượng
+										</div>
+										<div className="col-span-2 font-medium text-muted-foreground text-xs">
+											Đơn giá
+										</div>
+										<div className="col-span-2 font-medium text-muted-foreground text-xs">
+											%CK
+										</div>
+										<div className="col-span-2 text-right font-medium text-muted-foreground text-xs">
+											Thành tiền
+										</div>
 									</div>
 									{items.map((item, index) => (
-										<div
-											key={index}
-											className="space-y-1"
-										>
+										<div key={item.rowId} className="space-y-1">
 											<div className="grid grid-cols-12 items-center gap-2">
 												<div className="col-span-4">
 													<Select
@@ -387,16 +447,25 @@ function SalesOrdersPage() {
 															if (!v) return;
 															handleItemChange(index, "productId", v);
 															// Pre-fill discount from rules when product changes
-															const auto = applicableDiscounts?.[v]?.totalPercent;
-															if (auto !== undefined && items[index].discountPercent === "") {
-																handleItemChange(index, "discountPercent", String(auto));
+															const auto = getAutoDiscountPercent(v);
+															if (
+																auto !== undefined &&
+																!items[index].hasManualDiscount
+															) {
+																handleItemChange(
+																	index,
+																	"discountPercent",
+																	String(auto),
+																);
 															}
 														}}
 													>
 														<SelectTrigger className="h-10">
 															<SelectValue placeholder="Sản phẩm">
 																{item.productId
-																	? (products?.find((p) => p._id === item.productId)?.name ?? "Sản phẩm")
+																	? (products?.find(
+																			(p) => p._id === item.productId,
+																		)?.name ?? "Sản phẩm")
 																	: "Sản phẩm"}
 															</SelectValue>
 														</SelectTrigger>
@@ -415,7 +484,11 @@ function SalesOrdersPage() {
 														placeholder="1"
 														value={item.quantity}
 														onChange={(e) =>
-															handleItemChange(index, "quantity", e.target.value)
+															handleItemChange(
+																index,
+																"quantity",
+																e.target.value,
+															)
 														}
 														className="h-10"
 														min="1"
@@ -427,7 +500,11 @@ function SalesOrdersPage() {
 														placeholder="0"
 														value={item.unitPrice}
 														onChange={(e) =>
-															handleItemChange(index, "unitPrice", e.target.value)
+															handleItemChange(
+																index,
+																"unitPrice",
+																e.target.value,
+															)
 														}
 														className="h-10"
 														min="0"
@@ -438,30 +515,51 @@ function SalesOrdersPage() {
 													<div className="relative">
 														<Input
 															type="number"
-															placeholder={item.productId && applicableDiscounts?.[item.productId]
-																? String(applicableDiscounts[item.productId].totalPercent)
-																: "0"}
-															value={item.discountPercent}
-															onChange={(e) =>
-																handleItemChange(index, "discountPercent", e.target.value)
+															placeholder={
+																item.productId &&
+																getAutoDiscountPercent(item.productId) !==
+																	undefined
+																	? String(
+																			getAutoDiscountPercent(item.productId),
+																		)
+																	: "0"
 															}
+															value={item.discountPercent}
+															onChange={(e) => {
+																const value = e.target.value;
+																setItems((currentItems) => {
+																	const nextItems = [...currentItems];
+																	nextItems[index] = {
+																		...nextItems[index],
+																		discountPercent: value,
+																		hasManualDiscount: value !== "",
+																	};
+																	return nextItems;
+																});
+															}}
 															className="h-10 pr-6"
 															min="0"
 															max="100"
 														/>
-														<span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">%</span>
+														<span className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground text-xs">
+															%
+														</span>
 													</div>
 												</div>
 												<div className="col-span-2 flex items-center justify-end gap-1">
 													{(() => {
 														const qty = Number(item.quantity);
 														const price = Number(item.unitPrice);
-														const disc = item.discountPercent !== ""
-															? Number(item.discountPercent)
-															: (item.productId && applicableDiscounts?.[item.productId]?.totalPercent) || 0;
-														const total = qty && price ? qty * price * (1 - disc / 100) : null;
+														const disc =
+															item.discountPercent !== ""
+																? Number(item.discountPercent)
+																: getAutoDiscountPercent(item.productId) || 0;
+														const total =
+															qty && price
+																? qty * price * (1 - disc / 100)
+																: null;
 														return (
-															<span className="text-sm font-medium tabular-nums">
+															<span className="font-medium text-sm tabular-nums">
 																{total !== null ? formatCurrency(total) : "—"}
 															</span>
 														);
@@ -482,7 +580,7 @@ function SalesOrdersPage() {
 									))}
 									{/* Total summary */}
 									{items.some((i) => i.quantity && i.unitPrice) && (
-										<div className="mt-2 rounded-md border bg-muted/40 px-4 py-3 space-y-1">
+										<div className="mt-2 space-y-1 rounded-md border bg-muted/40 px-4 py-3">
 											{(() => {
 												const subtotal = items.reduce(
 													(sum, i) =>
@@ -493,27 +591,43 @@ function SalesOrdersPage() {
 												);
 												const totalDiscount = items.reduce((sum, i) => {
 													if (!i.quantity || !i.unitPrice) return sum;
-													const pct = i.discountPercent !== ""
-														? Number(i.discountPercent)
-														: (i.productId && applicableDiscounts?.[i.productId]?.totalPercent) || 0;
-													return sum + Number(i.quantity) * Number(i.unitPrice) * (pct / 100);
+													const pct =
+														i.discountPercent !== ""
+															? Number(i.discountPercent)
+															: getAutoDiscountPercent(i.productId) || 0;
+													return (
+														sum +
+														Number(i.quantity) *
+															Number(i.unitPrice) *
+															(pct / 100)
+													);
 												}, 0);
 												const grandTotal = subtotal - totalDiscount;
 												return (
 													<>
 														<div className="flex justify-between text-sm">
-															<span className="text-muted-foreground">Tổng cộng</span>
-															<span className="font-medium">{formatCurrency(subtotal)}</span>
+															<span className="text-muted-foreground">
+																Tổng cộng
+															</span>
+															<span className="font-medium">
+																{formatCurrency(subtotal)}
+															</span>
 														</div>
 														{totalDiscount > 0 && (
 															<div className="flex justify-between text-sm">
-																<span className="text-muted-foreground">Chiết khấu</span>
-																<span className="text-teal-700 font-medium">- {formatCurrency(totalDiscount)}</span>
+																<span className="text-muted-foreground">
+																	Chiết khấu
+																</span>
+																<span className="font-medium text-teal-700">
+																	- {formatCurrency(totalDiscount)}
+																</span>
 															</div>
 														)}
-														<div className="flex justify-between text-sm border-t pt-1 mt-1">
+														<div className="mt-1 flex justify-between border-t pt-1 text-sm">
 															<span className="font-semibold">Thực thu</span>
-															<span className="font-bold text-primary">{formatCurrency(grandTotal)}</span>
+															<span className="font-bold text-primary">
+																{formatCurrency(grandTotal)}
+															</span>
 														</div>
 													</>
 												);
@@ -612,7 +726,9 @@ function SalesOrdersPage() {
 														variant="ghost"
 														size="icon"
 														title="Xác nhận đơn"
-														onClick={() => openStatusDialog(order._id, "pending")}
+														onClick={() =>
+															openStatusDialog(order._id, "pending")
+														}
 													>
 														<CheckCircle className="h-4 w-4 text-green-500" />
 													</Button>
@@ -631,7 +747,9 @@ function SalesOrdersPage() {
 														variant="ghost"
 														size="icon"
 														title="Giao hàng"
-														onClick={() => openStatusDialog(order._id, "delivering")}
+														onClick={() =>
+															openStatusDialog(order._id, "delivering")
+														}
 													>
 														<Truck className="h-4 w-4 text-blue-500" />
 													</Button>
@@ -639,7 +757,9 @@ function SalesOrdersPage() {
 														variant="ghost"
 														size="icon"
 														title="Hủy đơn"
-														onClick={() => openStatusDialog(order._id, "cancelled")}
+														onClick={() =>
+															openStatusDialog(order._id, "cancelled")
+														}
 													>
 														<XCircle className="h-4 w-4 text-destructive" />
 													</Button>
@@ -650,7 +770,9 @@ function SalesOrdersPage() {
 													variant="ghost"
 													size="icon"
 													title="Hoàn thành"
-													onClick={() => openStatusDialog(order._id, "completed")}
+													onClick={() =>
+														openStatusDialog(order._id, "completed")
+													}
 												>
 													<CheckCircle className="h-4 w-4 text-green-600" />
 												</Button>
@@ -684,12 +806,20 @@ function SalesOrdersPage() {
 									{getStatusBadge(orderDetails.status)}
 								</div>
 								<div>
-									<p className="text-muted-foreground text-sm">Nhân viên bán hàng</p>
-									<p className="font-medium">{orderDetails.salesman?.name || "-"}</p>
+									<p className="text-muted-foreground text-sm">
+										Nhân viên bán hàng
+									</p>
+									<p className="font-medium">
+										{orderDetails.salesman?.name || "-"}
+									</p>
 								</div>
 								<div>
-									<p className="text-muted-foreground text-sm">Nhân viên giao hàng</p>
-									<p className="font-medium">{orderDetails.deliveryEmployee?.name || "-"}</p>
+									<p className="text-muted-foreground text-sm">
+										Nhân viên giao hàng
+									</p>
+									<p className="font-medium">
+										{orderDetails.deliveryEmployee?.name || "-"}
+									</p>
 								</div>
 								<div>
 									<p className="text-muted-foreground text-sm">Ngày đặt</p>
@@ -697,11 +827,17 @@ function SalesOrdersPage() {
 								</div>
 								<div>
 									<p className="text-muted-foreground text-sm">Tổng tiền</p>
-									<p className="font-bold">{formatCurrency(orderDetails.totalAmount)}</p>
+									<p className="font-bold">
+										{formatCurrency(orderDetails.totalAmount)}
+									</p>
 								</div>
 								<div>
-									<p className="text-muted-foreground text-sm">Tổng chiết khấu</p>
-									<p className="font-bold text-teal-700">{formatCurrency(orderDetails.totalDiscountAmount || 0)}</p>
+									<p className="text-muted-foreground text-sm">
+										Tổng chiết khấu
+									</p>
+									<p className="font-bold text-teal-700">
+										{formatCurrency(orderDetails.totalDiscountAmount || 0)}
+									</p>
 								</div>
 							</div>
 
@@ -731,13 +867,27 @@ function SalesOrdersPage() {
 										{orderDetails.items?.map((item) => (
 											<TableRow key={item._id}>
 												<TableCell>{item.product?.name}</TableCell>
-												<TableCell className="text-right">{item.quantity}</TableCell>
-												<TableCell className="text-right">{item.fulfilledQuantity || 0}</TableCell>
-												<TableCell className="text-right">{formatCurrency(item.baseUnitPrice ?? item.unitPrice)}</TableCell>
-												<TableCell className="text-right">{item.discountPercent ?? 0}%</TableCell>
-												<TableCell className="text-right">{formatCurrency(item.discountAmount ?? 0)}</TableCell>
-												<TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>
-												<TableCell className="text-right">{formatCurrency(item.quantity * item.unitPrice)}</TableCell>
+												<TableCell className="text-right">
+													{item.quantity}
+												</TableCell>
+												<TableCell className="text-right">
+													{item.fulfilledQuantity || 0}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(item.baseUnitPrice ?? item.unitPrice)}
+												</TableCell>
+												<TableCell className="text-right">
+													{item.discountPercent ?? 0}%
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(item.discountAmount ?? 0)}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(item.unitPrice)}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(item.quantity * item.unitPrice)}
+												</TableCell>
 											</TableRow>
 										))}
 									</TableBody>
@@ -750,26 +900,40 @@ function SalesOrdersPage() {
 								{statusLogs === undefined ? (
 									<p className="text-muted-foreground text-sm">Đang tải...</p>
 								) : statusLogs.length === 0 ? (
-									<p className="text-muted-foreground text-sm">Chưa có lịch sử thay đổi.</p>
+									<p className="text-muted-foreground text-sm">
+										Chưa có lịch sử thay đổi.
+									</p>
 								) : (
-									<ol className="relative border-l border-muted-foreground/20 ml-3 space-y-4">
+									<ol className="relative ml-3 space-y-4 border-muted-foreground/20 border-l">
 										{statusLogs.map((log) => (
 											<li key={log._id} className="ml-4">
 												<div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted-foreground/40" />
 												<div className="flex flex-col gap-0.5">
 													<div className="flex items-center gap-2">
 														{getStatusBadge(log.fromStatus)}
-														<span className="text-muted-foreground text-xs">→</span>
+														<span className="text-muted-foreground text-xs">
+															→
+														</span>
 														{getStatusBadge(log.toStatus)}
 													</div>
-													<p className="text-xs text-muted-foreground">
-														{formatDateTime(log.createdAt)} — <span className="font-medium text-foreground">{log.changedByName}</span>
+													<p className="text-muted-foreground text-xs">
+														{formatDateTime(log.createdAt)} —{" "}
+														<span className="font-medium text-foreground">
+															{log.changedByName}
+														</span>
 													</p>
 													{log.deliveryEmployee && (
-														<p className="text-xs text-muted-foreground">Giao bởi: <span className="font-medium text-foreground">{log.deliveryEmployee.name}</span></p>
+														<p className="text-muted-foreground text-xs">
+															Giao bởi:{" "}
+															<span className="font-medium text-foreground">
+																{log.deliveryEmployee.name}
+															</span>
+														</p>
 													)}
 													{log.comment && (
-														<p className="text-xs italic text-muted-foreground">"{log.comment}"</p>
+														<p className="text-muted-foreground text-xs italic">
+															"{log.comment}"
+														</p>
 													)}
 												</div>
 											</li>
@@ -780,7 +944,10 @@ function SalesOrdersPage() {
 						</div>
 					)}
 					<DialogFooter>
-						<Button variant="outline" onClick={() => setDetailDialogOpen(false)}>
+						<Button
+							variant="outline"
+							onClick={() => setDetailDialogOpen(false)}
+						>
 							Đóng
 						</Button>
 					</DialogFooter>
@@ -795,7 +962,9 @@ function SalesOrdersPage() {
 							<DialogTitle>Cập nhật trạng thái</DialogTitle>
 							<DialogDescription>
 								Chuyển sang:{" "}
-								<strong>{getStatusLabel(pendingStatusChange?.toStatus ?? "")}</strong>
+								<strong>
+									{getStatusLabel(pendingStatusChange?.toStatus ?? "")}
+								</strong>
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-4 py-4">
@@ -818,7 +987,9 @@ function SalesOrdersPage() {
 										<SelectTrigger>
 											<SelectValue placeholder="Chọn nhân viên giao">
 												{deliveryEmployeeId
-													? (employees?.find((e) => e._id === deliveryEmployeeId)?.name ?? "Chọn nhân viên giao")
+													? (employees?.find(
+															(e) => e._id === deliveryEmployeeId,
+														)?.name ?? "Chọn nhân viên giao")
 													: "Chọn nhân viên giao"}
 											</SelectValue>
 										</SelectTrigger>
@@ -843,7 +1014,13 @@ function SalesOrdersPage() {
 							</div>
 						</div>
 						<DialogFooter>
-							<Button type="button" variant="outline" onClick={() => setStatusDialogOpen(false)}>Hủy</Button>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setStatusDialogOpen(false)}
+							>
+								Hủy
+							</Button>
 							<Button type="submit">Xác nhận</Button>
 						</DialogFooter>
 					</form>

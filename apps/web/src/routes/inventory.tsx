@@ -175,7 +175,9 @@ function InventoryPage() {
 
 	// Inventory tab states
 	const [search, setSearch] = useState("");
-	const [expiryFilter, setExpiryFilter] = useState<"all" | "expiring" | "expired" | "valid">("all");
+	const [expiryFilter, setExpiryFilter] = useState<
+		"all" | "expiring" | "expired" | "valid"
+	>("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [form, setForm] = useState<InventoryForm>(initialInventoryForm);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -908,7 +910,9 @@ function InventoryPage() {
 										<SelectContent>
 											<SelectItem value="all">Tất cả HSD</SelectItem>
 											<SelectItem value="valid">Còn hạn</SelectItem>
-											<SelectItem value="expiring">Sắp hết hạn (&le;30 ngày)</SelectItem>
+											<SelectItem value="expiring">
+												Sắp hết hạn (&le;30 ngày)
+											</SelectItem>
 											<SelectItem value="expired">Đã hết hạn</SelectItem>
 										</SelectContent>
 									</Select>
@@ -1418,15 +1422,15 @@ function InventoryPage() {
 										<SelectContent>
 											{transferForm.transferType === "import_return"
 												? customerOptions.map((c) => (
-													<SelectItem key={c.value} value={c.value}>
-														{c.label}
-													</SelectItem>
-												))
+														<SelectItem key={c.value} value={c.value}>
+															{c.label}
+														</SelectItem>
+													))
 												: supplierOptions.map((s) => (
-													<SelectItem key={s.value} value={s.value}>
-														{s.label}
-													</SelectItem>
-												))}
+														<SelectItem key={s.value} value={s.value}>
+															{s.label}
+														</SelectItem>
+													))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -1569,10 +1573,10 @@ function InventoryPage() {
 
 											<div className="col-span-4">
 												<Label className="text-xs">Thành tiền</Label>
-												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
+												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 font-medium text-sm text-teal-700">
 													{formatCurrency(
 														(Number.parseFloat(item.quantity) || 0) *
-														(Number.parseFloat(item.unitPrice) || 0),
+															(Number.parseFloat(item.unitPrice) || 0),
 													)}
 												</div>
 											</div>
@@ -1596,7 +1600,9 @@ function InventoryPage() {
 						{/* Order total summary */}
 						<div className="rounded-lg border bg-muted/40 px-4 py-3">
 							<div className="flex items-center justify-between">
-								<span className="font-medium text-sm">Tổng giá trị đơn hàng</span>
+								<span className="font-medium text-sm">
+									Tổng giá trị đơn hàng
+								</span>
 								<span className="font-bold text-lg text-teal-700">
 									{formatCurrency(
 										transferForm.items.reduce((sum, item) => {
@@ -1608,7 +1614,12 @@ function InventoryPage() {
 								</span>
 							</div>
 							<p className="mt-1 text-muted-foreground text-xs">
-								{transferForm.items.filter((i) => i.productId && i.quantity && i.unitPrice).length} sản phẩm hợp lệ
+								{
+									transferForm.items.filter(
+										(i) => i.productId && i.quantity && i.unitPrice,
+									).length
+								}{" "}
+								sản phẩm hợp lệ
 							</p>
 						</div>
 						<DialogFooter>
@@ -1652,12 +1663,16 @@ function InventoryPage() {
 										<SelectTrigger>
 											{transferForm.transferType ? (
 												<span>
-													{EXPORT_TYPES.find(
-														(t) => t.value === transferForm.transferType,
-													)?.label}
+													{
+														EXPORT_TYPES.find(
+															(t) => t.value === transferForm.transferType,
+														)?.label
+													}
 												</span>
 											) : (
-												<span className="text-muted-foreground">Chọn loại phiếu</span>
+												<span className="text-muted-foreground">
+													Chọn loại phiếu
+												</span>
 											)}
 										</SelectTrigger>
 										<SelectContent>
@@ -1707,15 +1722,15 @@ function InventoryPage() {
 												transferForm.transferType,
 											)
 												? supplierOptions.map((s) => (
-													<SelectItem key={s.value} value={s.value}>
-														{s.label}
-													</SelectItem>
-												))
+														<SelectItem key={s.value} value={s.value}>
+															{s.label}
+														</SelectItem>
+													))
 												: customerOptions.map((c) => (
-													<SelectItem key={c.value} value={c.value}>
-														{c.label}
-													</SelectItem>
-												))}
+														<SelectItem key={c.value} value={c.value}>
+															{c.label}
+														</SelectItem>
+													))}
 										</SelectContent>
 									</Select>
 								</div>
@@ -1811,22 +1826,28 @@ function InventoryPage() {
 																	(i) => i._id === item.inventoryId,
 																);
 																return inv ? (
-																	<span>{inv.batchNumber} (SL: {inv.quantity})</span>
+																	<span>
+																		{inv.batchNumber} (SL: {inv.quantity})
+																	</span>
 																) : (
-																	<span className="text-muted-foreground text-xs">Chọn lô</span>
+																	<span className="text-muted-foreground text-xs">
+																		Chọn lô
+																	</span>
 																);
 															})()
 														) : (
-															<span className="text-muted-foreground text-xs">Chọn lô</span>
+															<span className="text-muted-foreground text-xs">
+																Chọn lô
+															</span>
 														)}
 													</SelectTrigger>
 													<SelectContent>
 														{item.productId === selectedProductIdForInventory
 															? availableInventory?.map((inv) => (
-																<SelectItem key={inv._id} value={inv._id}>
-																	{inv.batchNumber} (SL: {inv.quantity})
-																</SelectItem>
-															))
+																	<SelectItem key={inv._id} value={inv._id}>
+																		{inv.batchNumber} (SL: {inv.quantity})
+																	</SelectItem>
+																))
 															: null}
 													</SelectContent>
 												</Select>
@@ -1886,10 +1907,10 @@ function InventoryPage() {
 
 											<div className="col-span-2">
 												<Label className="text-xs">Thành tiền</Label>
-												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 text-sm font-medium text-teal-700">
+												<div className="mt-1 flex h-9 items-center rounded-md border bg-muted px-3 font-medium text-sm text-teal-700">
 													{formatCurrency(
 														(Number.parseFloat(item.quantity) || 0) *
-														(Number.parseFloat(item.unitPrice) || 0),
+															(Number.parseFloat(item.unitPrice) || 0),
 													)}
 												</div>
 											</div>
@@ -1913,7 +1934,9 @@ function InventoryPage() {
 						{/* Order total summary */}
 						<div className="rounded-lg border bg-muted/40 px-4 py-3">
 							<div className="flex items-center justify-between">
-								<span className="font-medium text-sm">Tổng giá trị đơn hàng</span>
+								<span className="font-medium text-sm">
+									Tổng giá trị đơn hàng
+								</span>
 								<span className="font-bold text-lg text-teal-700">
 									{formatCurrency(
 										transferForm.items.reduce((sum, item) => {
@@ -1925,7 +1948,12 @@ function InventoryPage() {
 								</span>
 							</div>
 							<p className="mt-1 text-muted-foreground text-xs">
-								{transferForm.items.filter((i) => i.productId && i.quantity && i.unitPrice).length} sản phẩm hợp lệ
+								{
+									transferForm.items.filter(
+										(i) => i.productId && i.quantity && i.unitPrice,
+									).length
+								}{" "}
+								sản phẩm hợp lệ
 							</p>
 						</div>
 						<DialogFooter>

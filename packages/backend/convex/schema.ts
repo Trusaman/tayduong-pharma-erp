@@ -229,12 +229,14 @@ export default defineSchema({
 		totalDiscountAmount: v.optional(v.number()),
 		notes: v.optional(v.string()),
 		orderDate: v.number(),
+		completedAt: v.optional(v.number()),
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	})
 		.index("by_orderNumber", ["orderNumber"])
 		.index("by_customer", ["customerId"])
 		.index("by_salesman", ["salesmanId"])
+		.index("by_status_and_completedAt", ["status", "completedAt"])
 		.index("by_status", ["status"]),
 
 	// Sales Order Items
@@ -247,9 +249,119 @@ export default defineSchema({
 		discountPercent: v.optional(v.number()),
 		discountAmount: v.optional(v.number()),
 		appliedDiscountTypes: v.optional(v.array(v.string())),
+		appliedDiscountBreakdown: v.optional(
+			v.array(
+				v.object({
+					ruleId: v.id("discountRules"),
+					ruleName: v.string(),
+					discountType: v.union(
+						v.literal("Doctor"),
+						v.literal("hospital"),
+						v.literal("payment"),
+						v.literal("CTV"),
+						v.literal("Salesman"),
+						v.literal("Manager"),
+					),
+					salesmanId: v.id("salesmen"),
+					salesmanName: v.optional(v.string()),
+					configuredPercent: v.number(),
+					allocatedPercent: v.number(),
+					discountAmount: v.number(),
+				}),
+			),
+		),
 		fulfilledQuantity: v.number(),
 		createdAt: v.number(),
 	}).index("by_salesOrder", ["salesOrderId"]),
+
+	monthlyDiscountCalculations: defineTable({
+		periodKey: v.string(),
+		month: v.number(),
+		year: v.number(),
+		startDate: v.number(),
+		endDate: v.number(),
+		orderCount: v.number(),
+		entryCount: v.number(),
+		recipientCount: v.number(),
+		totalDiscountAmount: v.number(),
+		savedBy: v.string(),
+		notes: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	}).index("by_period_key", ["periodKey"]),
+
+	monthlyDiscountCalculationEntries: defineTable({
+		calculationId: v.id("monthlyDiscountCalculations"),
+		periodKey: v.string(),
+		month: v.number(),
+		year: v.number(),
+		salesmanId: v.id("salesmen"),
+		salesmanNameSnapshot: v.string(),
+		salesOrderId: v.id("salesOrders"),
+		salesOrderItemId: v.id("salesOrderItems"),
+		orderNumber: v.string(),
+		orderDate: v.number(),
+		completedAt: v.number(),
+		customerId: v.id("customers"),
+		customerNameSnapshot: v.string(),
+		productId: v.id("products"),
+		productNameSnapshot: v.string(),
+		quantity: v.number(),
+		baseUnitPrice: v.number(),
+		revenueAmount: v.number(),
+		lineDiscountAmount: v.number(),
+		discountType: v.union(
+			v.literal("Doctor"),
+			v.literal("hospital"),
+			v.literal("payment"),
+			v.literal("CTV"),
+			v.literal("Salesman"),
+			v.literal("Manager"),
+		),
+		ruleId: v.optional(v.id("discountRules")),
+		ruleName: v.string(),
+		configuredPercent: v.number(),
+		allocatedPercent: v.number(),
+		discountAmount: v.number(),
+		createdAt: v.number(),
+	})
+		.index("by_calculation", ["calculationId"])
+		.index("by_salesman", ["salesmanId"])
+		.index("by_period_key", ["periodKey"]),
+
+	employeeDiscountDebts: defineTable({
+		calculationId: v.id("monthlyDiscountCalculations"),
+		periodKey: v.string(),
+		month: v.number(),
+		year: v.number(),
+		salesmanId: v.id("salesmen"),
+		salesmanNameSnapshot: v.string(),
+		totalDebtAmount: v.number(),
+		paidAmount: v.number(),
+		remainingAmount: v.number(),
+		paymentStatus: v.union(
+			v.literal("unpaid"),
+			v.literal("partial"),
+			v.literal("paid"),
+		),
+		lastPaidAt: v.optional(v.number()),
+		notes: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})
+		.index("by_calculation", ["calculationId"])
+		.index("by_salesman", ["salesmanId"])
+		.index("by_period_key", ["periodKey"])
+		.index("by_status", ["paymentStatus"]),
+
+	employeeDiscountDebtPayments: defineTable({
+		debtId: v.id("employeeDiscountDebts"),
+		amount: v.number(),
+		paymentDate: v.number(),
+		paidBy: v.string(),
+		notes: v.optional(v.string()),
+		createdAt: v.number(),
+	}).index("by_debt", ["debtId"]),
 
 	// Sales Order Status Logs
 	salesOrderStatusLogs: defineTable({

@@ -1,59 +1,25 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { type MutationCtx, mutation, query } from "./_generated/server";
+import {
+	allocateDiscountBreakdown,
+	getMatchingRuleDiscounts,
+} from "./discountCalculationUtils";
 
 // Generate order number
-async function generateOrderNumber(ctx: any): Promise<string> {
+async function generateOrderNumber(ctx: MutationCtx): Promise<string> {
 	const now = new Date();
 	const year = now.getFullYear();
 	const month = String(now.getMonth() + 1).padStart(2, "0");
 
 	const orders = await ctx.db
 		.query("salesOrders")
-		.filter((q: any) =>
+		.filter((q) =>
 			q.gte(q.field("createdAt"), new Date(year, now.getMonth(), 1).getTime()),
 		)
 		.collect();
 
 	const sequence = String(orders.length + 1).padStart(4, "0");
 	return `SO${year}${month}-${sequence}`;
-}
-
-function getDiscountEntries(rule: {
-	doctorDiscount?: { discountPercent: number };
-	salesDiscount?: { discountPercent: number };
-	paymentDiscount?: { discountPercent: number };
-	ctvDiscount?: { discountPercent: number };
-	managerDiscount?: { discountPercent: number };
-	discountPercent?: number;
-}) {
-	const values = [
-		rule.doctorDiscount?.discountPercent,
-		rule.salesDiscount?.discountPercent,
-		rule.paymentDiscount?.discountPercent,
-		rule.ctvDiscount?.discountPercent,
-		rule.managerDiscount?.discountPercent,
-	].filter((value): value is number => typeof value === "number");
-
-	if (values.length > 0) return values;
-	return typeof rule.discountPercent === "number" ? [rule.discountPercent] : [];
-}
-
-function getAppliedDiscountTypes(rule: {
-	doctorDiscount?: { discountPercent: number };
-	salesDiscount?: { discountPercent: number };
-	paymentDiscount?: { discountPercent: number };
-	ctvDiscount?: { discountPercent: number };
-	managerDiscount?: { discountPercent: number };
-	discountType?: string;
-}) {
-	const types: string[] = [];
-	if (rule.doctorDiscount) types.push("Doctor");
-	if (rule.salesDiscount) types.push("hospital");
-	if (rule.paymentDiscount) types.push("payment");
-	if (rule.ctvDiscount) types.push("CTV");
-	if (rule.managerDiscount) types.push("Manager");
-	if (types.length > 0) return types;
-	return rule.discountType ? [rule.discountType] : [];
 }
 
 export const list = query({
@@ -69,10 +35,11 @@ export const list = query({
 		),
 	},
 	handler: async (ctx, args) => {
-		if (args.status) {
+		const status = args.status;
+		if (status !== undefined) {
 			return await ctx.db
 				.query("salesOrders")
-				.withIndex("by_status", (q) => q.eq("status", args.status!))
+				.withIndex("by_status", (q) => q.eq("status", status))
 				.order("desc")
 				.collect();
 		}
@@ -188,26 +155,21 @@ export const create = mutation({
 			.withIndex("by_active", (q) => q.eq("isActive", true))
 			.collect();
 
+		const salesmen = await ctx.db.query("salesmen").collect();
+		const salesmanNameById = new Map(
+			salesmen.map((salesman) => [salesman._id, salesman.name]),
+		);
+
 		const preparedItems = args.items.map((item) => {
-			const matched = discountRules.filter((rule) => {
-				const customerMatch =
-					!rule.customerId || rule.customerId === args.customerId;
-				const productMatch =
-					!rule.productId || rule.productId === item.productId;
-				return customerMatch && productMatch;
-			});
+			const matched = getMatchingRuleDiscounts(
+				discountRules,
+				args.customerId,
+				item.productId,
+			);
 
 			const autoDiscountPercent = Math.min(
 				100,
-				matched.reduce(
-					(sum, rule) =>
-						sum +
-						getDiscountEntries(rule).reduce(
-							(total, percent) => total + percent,
-							0,
-						),
-					0,
-				),
+				matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
 			);
 			const discountPercent =
 				item.manualDiscountPercent !== undefined
@@ -218,6 +180,14 @@ export const create = mutation({
 			const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
 			const discountAmount =
 				item.quantity * (baseUnitPrice - discountedUnitPrice);
+			const appliedDiscountBreakdown = allocateDiscountBreakdown(
+				matched,
+				discountPercent,
+				discountAmount,
+			).map((entry) => ({
+				...entry,
+				salesmanName: salesmanNameById.get(entry.salesmanId),
+			}));
 
 			return {
 				...item,
@@ -225,9 +195,8 @@ export const create = mutation({
 				unitPrice: discountedUnitPrice,
 				discountPercent,
 				discountAmount,
-				appliedDiscountTypes: matched.flatMap((rule) =>
-					getAppliedDiscountTypes(rule),
-				),
+				appliedDiscountTypes: matched.map((rule) => rule.discountType),
+				appliedDiscountBreakdown,
 			};
 		});
 
@@ -264,6 +233,7 @@ export const create = mutation({
 				discountPercent: item.discountPercent,
 				discountAmount: item.discountAmount,
 				appliedDiscountTypes: item.appliedDiscountTypes,
+				appliedDiscountBreakdown: item.appliedDiscountBreakdown,
 				fulfilledQuantity: 0,
 				createdAt: now,
 			});
@@ -290,11 +260,15 @@ export const updateStatus = mutation({
 	handler: async (ctx, args) => {
 		const order = await ctx.db.get(args.id);
 		if (!order) throw new Error("Không tìm thấy đơn hàng");
+		const now = Date.now();
 
 		const patchData: Record<string, unknown> = {
 			status: args.status,
-			updatedAt: Date.now(),
+			updatedAt: now,
 		};
+		if (args.status === "completed") {
+			patchData.completedAt = now;
+		}
 		if (args.deliveryEmployeeId) {
 			patchData.deliveryEmployeeId = args.deliveryEmployeeId;
 		}
@@ -308,7 +282,7 @@ export const updateStatus = mutation({
 			changedByName: args.changedByName,
 			comment: args.comment,
 			deliveryEmployeeId: args.deliveryEmployeeId,
-			createdAt: Date.now(),
+			createdAt: now,
 		});
 
 		return await ctx.db.get(args.id);
@@ -383,6 +357,7 @@ export const fulfillItems = mutation({
 
 		await ctx.db.patch(args.salesOrderId, {
 			status: fullyFulfilled ? "completed" : "delivering",
+			completedAt: fullyFulfilled ? now : undefined,
 			updatedAt: now,
 		});
 

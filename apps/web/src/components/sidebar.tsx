@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
 	BadgePercent,
+	Calculator,
 	ChevronLeft,
 	ClipboardList,
 	FileBarChart,
@@ -11,6 +12,7 @@ import {
 	UserCheck,
 	UserCircle,
 	Users,
+	Wallet,
 	Warehouse,
 } from "lucide-react";
 import { useState } from "react";
@@ -27,7 +29,9 @@ const navigation = [
 	{ name: "Nhân viên", href: "/employees", icon: UserCheck },
 	{ name: "Đơn nhập", href: "/purchase-orders", icon: ShoppingCart },
 	{ name: "Đơn bán", href: "/sales-orders", icon: ClipboardList },
-	{ name: "Khuyến mãi", href: "/discounts", icon: BadgePercent },
+	{ name: "Chiết khấu", href: "/discounts", icon: BadgePercent },
+	{ name: "Tính chiết khấu", href: "/discount-calculations", icon: Calculator },
+	{ name: "Công nợ CK", href: "/discount-debts", icon: Wallet },
 	{ name: "Báo cáo", href: "/reports", icon: FileBarChart },
 ];
 

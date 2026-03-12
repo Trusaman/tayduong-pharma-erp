@@ -17,6 +17,8 @@ import { Route as ProductsRouteImport } from './routes/products'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as EmployeesRouteImport } from './routes/employees'
 import { Route as DiscountsRouteImport } from './routes/discounts'
+import { Route as DiscountDebtsRouteImport } from './routes/discount-debts'
+import { Route as DiscountCalculationsRouteImport } from './routes/discount-calculations'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as IndexRouteImport } from './routes/index'
@@ -62,6 +64,16 @@ const DiscountsRoute = DiscountsRouteImport.update({
   path: '/discounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DiscountDebtsRoute = DiscountDebtsRouteImport.update({
+  id: '/discount-debts',
+  path: '/discount-debts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiscountCalculationsRoute = DiscountCalculationsRouteImport.update({
+  id: '/discount-calculations',
+  path: '/discount-calculations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -87,6 +99,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/discount-calculations': typeof DiscountCalculationsRoute
+  '/discount-debts': typeof DiscountDebtsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -101,6 +115,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/discount-calculations': typeof DiscountCalculationsRoute
+  '/discount-debts': typeof DiscountDebtsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -116,6 +132,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
+  '/discount-calculations': typeof DiscountCalculationsRoute
+  '/discount-debts': typeof DiscountDebtsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -132,6 +150,8 @@ export interface FileRouteTypes {
     | '/'
     | '/customers'
     | '/dashboard'
+    | '/discount-calculations'
+    | '/discount-debts'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -146,6 +166,8 @@ export interface FileRouteTypes {
     | '/'
     | '/customers'
     | '/dashboard'
+    | '/discount-calculations'
+    | '/discount-debts'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -160,6 +182,8 @@ export interface FileRouteTypes {
     | '/'
     | '/customers'
     | '/dashboard'
+    | '/discount-calculations'
+    | '/discount-debts'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -175,6 +199,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CustomersRoute: typeof CustomersRoute
   DashboardRoute: typeof DashboardRoute
+  DiscountCalculationsRoute: typeof DiscountCalculationsRoute
+  DiscountDebtsRoute: typeof DiscountDebtsRoute
   DiscountsRoute: typeof DiscountsRoute
   EmployeesRoute: typeof EmployeesRoute
   InventoryRoute: typeof InventoryRoute
@@ -244,6 +270,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DiscountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/discount-debts': {
+      id: '/discount-debts'
+      path: '/discount-debts'
+      fullPath: '/discount-debts'
+      preLoaderRoute: typeof DiscountDebtsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/discount-calculations': {
+      id: '/discount-calculations'
+      path: '/discount-calculations'
+      fullPath: '/discount-calculations'
+      preLoaderRoute: typeof DiscountCalculationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -279,6 +319,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CustomersRoute: CustomersRoute,
   DashboardRoute: DashboardRoute,
+  DiscountCalculationsRoute: DiscountCalculationsRoute,
+  DiscountDebtsRoute: DiscountDebtsRoute,
   DiscountsRoute: DiscountsRoute,
   EmployeesRoute: EmployeesRoute,
   InventoryRoute: InventoryRoute,

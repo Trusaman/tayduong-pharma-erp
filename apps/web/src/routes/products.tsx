@@ -94,7 +94,9 @@ const initialForm: ProductForm = {
 
 function ProductsPage() {
 	const [search, setSearch] = useState("");
-	const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
+	const [activeFilter, setActiveFilter] = useState<
+		"all" | "active" | "inactive"
+	>("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [form, setForm] = useState<ProductForm>(initialForm);
@@ -574,9 +576,15 @@ function ProductsPage() {
 												onClick={() => handleToggleActive(product)}
 											>
 												{product.isActive ? (
-													<><EyeOff className="h-3.5 w-3.5" />Ngưng theo dõi</>
+													<>
+														<EyeOff className="h-3.5 w-3.5" />
+														Ngưng theo dõi
+													</>
 												) : (
-													<><Eye className="h-3.5 w-3.5 text-teal-600" />Theo dõi lại</>
+													<>
+														<Eye className="h-3.5 w-3.5 text-teal-600" />
+														Theo dõi lại
+													</>
 												)}
 											</Button>
 										</TableCell>
@@ -667,14 +675,14 @@ function ProductsPage() {
 								</p>
 								{toggleConfirmProduct?.isActive ? (
 									<p className="text-orange-600 text-sm">
-										⚠️ Sản phẩm này sẽ bị ẩn khỏi danh sách bán
-										hàng và không thể chọn khi tạo phiếu nhập/xuất
-										mới. Dữ liệu lịch sử vẫn được giữ nguyên.
+										⚠️ Sản phẩm này sẽ bị ẩn khỏi danh sách bán hàng và không thể
+										chọn khi tạo phiếu nhập/xuất mới. Dữ liệu lịch sử vẫn được
+										giữ nguyên.
 									</p>
 								) : (
-									<p className="text-teal-600 text-sm">
-										✅ Sản phẩm này sẽ được hiển thị lại và có thể
-										sử dụng trong các phiếu nhập/xuất.
+									<p className="text-sm text-teal-600">
+										✅ Sản phẩm này sẽ được hiển thị lại và có thể sử dụng trong
+										các phiếu nhập/xuất.
 									</p>
 								)}
 							</div>
@@ -688,7 +696,9 @@ function ProductsPage() {
 							Hủy
 						</Button>
 						<Button
-							variant={toggleConfirmProduct?.isActive ? "destructive" : "default"}
+							variant={
+								toggleConfirmProduct?.isActive ? "destructive" : "default"
+							}
 							onClick={handleConfirmToggle}
 						>
 							{toggleConfirmProduct?.isActive
