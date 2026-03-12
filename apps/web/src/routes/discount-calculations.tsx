@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { Calculator, RefreshCw, Save, Search } from "lucide-react";
+import { Calculator, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -148,6 +148,7 @@ function DiscountCalculationsPage() {
 	const [notes, setNotes] = useState("");
 	const [isRecalculating, setIsRecalculating] = useState(false);
 	const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
+	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
 	const [yearText, monthText] = period.split("-");
 	const year = Number(yearText);
@@ -160,6 +161,9 @@ function DiscountCalculationsPage() {
 	const currentUser = useQuery(api.auth.getCurrentUser);
 	const repairMonthlySourceOrders = useMutation(
 		api.discountCalculations.repairMonthlySourceOrders,
+	);
+	const deleteMonthlyCalculation = useMutation(
+		api.discountCalculations.deleteMonthlyCalculation,
 	);
 	const saveMonthly = useMutation(api.discountCalculations.saveMonthly);
 
@@ -353,6 +357,29 @@ function DiscountCalculationsPage() {
 		}
 	};
 
+	const handleDeleteMonthlyCalculation = async () => {
+		if (!preview?.existingCalculation) return;
+
+		try {
+			const result = await deleteMonthlyCalculation({
+				calculationId: preview.existingCalculation._id,
+			});
+			toast.success(`Đã xóa bảng công nợ tháng ${result.periodKey}`);
+			setDeleteDialogOpen(false);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa bảng công nợ tháng",
+			);
+		}
+	};
+
+	const existingCalculationDebtCount =
+		preview?.existingCalculationSummary?.debtCount ?? 0;
+	const existingCalculationPaymentCount =
+		preview?.existingCalculationSummary?.totalPaymentCount ?? 0;
+
 	return (
 		<div className="space-y-6">
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -425,7 +452,7 @@ function DiscountCalculationsPage() {
 
 			{preview?.existingCalculation ? (
 				<Card className="border-teal-200 bg-teal-50/60">
-					<CardContent className="flex flex-col gap-2 p-4 text-sm md:flex-row md:items-center md:justify-between">
+					<CardContent className="flex flex-col gap-3 p-4 text-sm md:flex-row md:items-center md:justify-between">
 						<div>
 							<p className="font-medium text-teal-700">
 								Tháng này đã có bảng tính lưu
@@ -436,10 +463,25 @@ function DiscountCalculationsPage() {
 									"vi-VN",
 								)}
 							</p>
+							<p className="text-muted-foreground text-xs">
+								{existingCalculationDebtCount} công nợ,{" "}
+								{existingCalculationPaymentCount} thanh toán đã ghi nhận
+							</p>
 						</div>
-						<Badge variant="secondary">
-							{preview.existingCalculation.periodKey}
-						</Badge>
+						<div className="flex items-center gap-2 self-start md:self-auto">
+							<Badge variant="secondary">
+								{preview.existingCalculation.periodKey}
+							</Badge>
+							<Button
+								variant="destructive"
+								size="sm"
+								onClick={() => setDeleteDialogOpen(true)}
+								disabled={existingCalculationPaymentCount > 0}
+							>
+								<Trash2 className="mr-2 h-4 w-4" />
+								Xóa công nợ
+							</Button>
+						</div>
 					</CardContent>
 				</Card>
 			) : null}
@@ -716,6 +758,33 @@ function DiscountCalculationsPage() {
 							/>
 							Xác nhận tính lại
 						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							Xóa bảng công nợ tháng {period}?
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							{existingCalculationPaymentCount > 0
+								? `Bảng tháng này hiện có ${existingCalculationDebtCount} công nợ và ${existingCalculationPaymentCount} thanh toán đã ghi nhận, nên hệ thống sẽ không cho xóa để tránh mất lịch sử đối soát.`
+								: `Thao tác này sẽ xóa snapshot công nợ đã lưu và ${existingCalculationDebtCount} công nợ trong tháng. Sau khi xóa, bạn có thể lưu lại bảng công nợ mới từ dữ liệu đã tính lại.`}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Hủy</AlertDialogCancel>
+						{existingCalculationPaymentCount > 0 ? null : (
+							<AlertDialogAction
+								className="bg-destructive text-destructive-foreground"
+								onClick={handleDeleteMonthlyCalculation}
+							>
+								<Trash2 className="mr-2 h-4 w-4" />
+								Xóa công nợ
+							</AlertDialogAction>
+						)}
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>

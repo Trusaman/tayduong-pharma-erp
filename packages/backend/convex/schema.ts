@@ -326,6 +326,7 @@ export default defineSchema({
 		createdAt: v.number(),
 	})
 		.index("by_calculation", ["calculationId"])
+		.index("by_calculation_and_salesman", ["calculationId", "salesmanId"])
 		.index("by_salesman", ["salesmanId"])
 		.index("by_period_key", ["periodKey"]),
 
@@ -376,6 +377,24 @@ export default defineSchema({
 		createdAt: v.number(),
 		updatedAt: v.optional(v.number()),
 	}).index("by_debt", ["debtId"]),
+
+	employeeDiscountDebtOrderPayments: defineTable({
+		debtId: v.id("employeeDiscountDebts"),
+		calculationId: v.id("monthlyDiscountCalculations"),
+		periodKey: v.string(),
+		salesmanId: v.id("salesmen"),
+		salesOrderId: v.id("salesOrders"),
+		orderNumberSnapshot: v.string(),
+		amount: v.number(),
+		paymentDate: v.number(),
+		paidBy: v.string(),
+		notes: v.optional(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.optional(v.number()),
+	})
+		.index("by_debt", ["debtId"])
+		.index("by_debt_and_order", ["debtId", "salesOrderId"])
+		.index("by_calculation", ["calculationId"]),
 
 	// Sales Order Status Logs
 	salesOrderStatusLogs: defineTable({

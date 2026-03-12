@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import type { Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { History, Pencil, Search, Wallet } from "lucide-react";
+import { FileText, History, Pencil, Search, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -39,14 +39,69 @@ export const Route = createFileRoute("/discount-debts")({
 	component: DiscountDebtsPage,
 });
 
+const discountBadgeLabels = {
+	Doctor: "BS",
+	hospital: "NT, KD",
+	payment: "Thanh toán",
+	CTV: "CTV",
+	Salesman: "NT, KD",
+	Manager: "Quản lý",
+} as const;
+
+type DiscountTypeKey = keyof typeof discountBadgeLabels;
+
+type DebtOrderDetail = {
+	salesOrderId: Id<"salesOrders">;
+	orderNumber: string;
+	orderDate: number;
+	completedAt: number;
+	customerNameSnapshot: string;
+	totalDiscountAmount: number;
+	paidAmount: number;
+	remainingAmount: number;
+	paymentCount: number;
+	paymentStatus: "unpaid" | "partial" | "paid";
+	lastPaidAt?: number;
+	latestPayment: {
+		amount: number;
+		paymentDate: number;
+		paidBy: string;
+		createdAt: number;
+		updatedAt?: number;
+	} | null;
+	byType: Record<DiscountTypeKey, number>;
+	entryDetails: Array<{
+		salesOrderItemId: Id<"salesOrderItems">;
+		productNameSnapshot: string;
+		quantity: number;
+		discountType: DiscountTypeKey;
+		ruleName: string;
+		allocatedPercent: number;
+		discountAmount: number;
+	}>;
+};
+
+type DebtOrderPayment = {
+	_id: Id<"employeeDiscountDebtOrderPayments">;
+	amount: number;
+	paymentDate: number;
+	paidBy: string;
+	notes?: string;
+	createdAt: number;
+	updatedAt?: number;
+};
+
 function DiscountDebtsPage() {
 	const [periodKey, setPeriodKey] = useState("all");
 	const [paymentStatus, setPaymentStatus] = useState("all");
 	const [search, setSearch] = useState("");
 	const [selectedDebtId, setSelectedDebtId] = useState<string | null>(null);
+	const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 	const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+	const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 	const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-	const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+	const [paymentHistoryDialogOpen, setPaymentHistoryDialogOpen] =
+		useState(false);
 	const [amount, setAmount] = useState("");
 	const [paymentDate, setPaymentDate] = useState(
 		new Date().toISOString().slice(0, 10),
@@ -65,15 +120,31 @@ function DiscountDebtsPage() {
 	});
 	const selectedDebt =
 		debts?.find((debt) => debt._id === selectedDebtId) ?? null;
-	const payments = useQuery(
-		api.discountCalculations.getDebtPayments,
+	const debtOrderDetails = useQuery(
+		api.discountCalculations.getDebtOrderDetails,
 		selectedDebt
 			? { debtId: selectedDebt._id as Id<"employeeDiscountDebts"> }
 			: "skip",
 	);
-	const recordPayment = useMutation(api.discountCalculations.recordDebtPayment);
-	const updateDebtPayment = useMutation(
-		api.discountCalculations.updateDebtPayment,
+	const selectedOrder =
+		debtOrderDetails?.orders.find(
+			(order: DebtOrderDetail) =>
+				String(order.salesOrderId) === selectedOrderId,
+		) ?? null;
+	const orderPayments = useQuery(
+		api.discountCalculations.getDebtOrderPaymentHistory,
+		selectedDebt && selectedOrder
+			? {
+					debtId: selectedDebt._id as Id<"employeeDiscountDebts">,
+					salesOrderId: selectedOrder.salesOrderId,
+				}
+			: "skip",
+	);
+	const recordDebtOrderPayment = useMutation(
+		api.discountCalculations.recordDebtOrderPayment,
+	);
+	const updateDebtOrderPayment = useMutation(
+		api.discountCalculations.updateDebtOrderPayment,
 	);
 
 	const filteredDebts = useMemo(() => {
@@ -88,17 +159,19 @@ function DiscountDebtsPage() {
 		);
 	}, [debts, search]);
 
-	const stats = useMemo(() => {
-		return filteredDebts.reduce(
-			(result, debt) => {
-				result.totalDebt += debt.totalDebtAmount;
-				result.totalPaid += debt.paidAmount;
-				result.totalRemaining += debt.remainingAmount;
-				return result;
-			},
-			{ totalDebt: 0, totalPaid: 0, totalRemaining: 0 },
-		);
-	}, [filteredDebts]);
+	const stats = useMemo(
+		() =>
+			filteredDebts.reduce(
+				(result, debt) => {
+					result.totalDebt += debt.totalDebtAmount;
+					result.totalPaid += debt.paidAmount;
+					result.totalRemaining += debt.remainingAmount;
+					return result;
+				},
+				{ totalDebt: 0, totalPaid: 0, totalRemaining: 0 },
+			),
+		[filteredDebts],
+	);
 
 	const formatCurrency = (value: number) =>
 		new Intl.NumberFormat("vi-VN", {
@@ -107,11 +180,8 @@ function DiscountDebtsPage() {
 			maximumFractionDigits: 2,
 		}).format(value);
 
-	const statusLabel = {
-		unpaid: "Chưa thanh toán",
-		partial: "Thanh toán một phần",
-		paid: "Đã thanh toán",
-	} as const;
+	const formatDateTime = (timestamp: number) =>
+		new Date(timestamp).toLocaleString("vi-VN");
 
 	const formatDateInputValue = (timestamp: number) => {
 		const date = new Date(timestamp);
@@ -121,11 +191,30 @@ function DiscountDebtsPage() {
 		return `${year}-${month}-${day}`;
 	};
 
-	const formatDateTime = (timestamp: number) =>
-		new Date(timestamp).toLocaleString("vi-VN");
+	const statusLabel = {
+		unpaid: "Chưa thanh toán",
+		partial: "Thanh toán một phần",
+		paid: "Đã thanh toán",
+	} as const;
 
-	const openPaymentDialog = (debtId: string) => {
+	const canManageOrderPayments =
+		(debtOrderDetails?.legacyPaymentCount ?? 0) === 0;
+
+	const openDebtDetailDialog = (debtId: string) => {
 		setSelectedDebtId(debtId);
+		setSelectedOrderId(null);
+		setEditingPaymentId(null);
+		setDetailDialogOpen(true);
+	};
+
+	const openOrderPaymentDialog = (
+		debtId: string | null,
+		order: DebtOrderDetail,
+	) => {
+		if (!debtId) return;
+
+		setSelectedDebtId(debtId);
+		setSelectedOrderId(String(order.salesOrderId));
 		setEditingPaymentId(null);
 		setAmount("");
 		setPaidBy(currentUser?.name ?? currentUser?.email ?? "");
@@ -134,59 +223,70 @@ function DiscountDebtsPage() {
 		setPaymentDialogOpen(true);
 	};
 
-	const openEditPaymentDialog = (
+	const openPaymentHistoryDialog = (
 		debtId: string | null,
-		payment: NonNullable<typeof payments>[number],
+		order: DebtOrderDetail,
 	) => {
 		if (!debtId) return;
 
 		setSelectedDebtId(debtId);
+		setSelectedOrderId(String(order.salesOrderId));
+		setPaymentHistoryDialogOpen(true);
+	};
+
+	const openEditOrderPaymentDialog = (payment: DebtOrderPayment) => {
 		setEditingPaymentId(payment._id);
 		setAmount(String(payment.amount));
 		setPaidBy(payment.paidBy);
 		setNotes(payment.notes ?? "");
 		setPaymentDate(formatDateInputValue(payment.paymentDate));
-		setHistoryDialogOpen(false);
+		setPaymentHistoryDialogOpen(false);
 		setPaymentDialogOpen(true);
 	};
 
-	const openHistoryDialog = (debtId: string) => {
-		setSelectedDebtId(debtId);
-		setHistoryDialogOpen(true);
+	const closePaymentDialog = () => {
+		setPaymentDialogOpen(false);
+		setEditingPaymentId(null);
 	};
 
-	const handleSubmitPayment = async () => {
-		if (!selectedDebt) return;
+	const handleSubmitOrderPayment = async () => {
+		if (!selectedDebt || !selectedOrder) return;
 
 		try {
 			if (editingPaymentId) {
-				await updateDebtPayment({
-					paymentId: editingPaymentId as Id<"employeeDiscountDebtPayments">,
+				await updateDebtOrderPayment({
+					paymentId:
+						editingPaymentId as Id<"employeeDiscountDebtOrderPayments">,
 					amount: Number(amount),
 					paymentDate: new Date(paymentDate).getTime(),
 					paidBy,
 					notes: notes.trim() || undefined,
 				});
-				toast.success("Đã cập nhật thanh toán công nợ chiết khấu");
+				toast.success(
+					`Đã cập nhật thanh toán cho đơn ${selectedOrder.orderNumber}`,
+				);
 			} else {
-				await recordPayment({
+				await recordDebtOrderPayment({
 					debtId: selectedDebt._id as Id<"employeeDiscountDebts">,
+					salesOrderId: selectedOrder.salesOrderId,
 					amount: Number(amount),
 					paymentDate: new Date(paymentDate).getTime(),
 					paidBy,
 					notes: notes.trim() || undefined,
 				});
-				toast.success("Đã ghi nhận thanh toán công nợ chiết khấu");
+				toast.success(
+					`Đã ghi nhận thanh toán cho đơn ${selectedOrder.orderNumber}`,
+				);
 			}
-			setPaymentDialogOpen(false);
-			setEditingPaymentId(null);
+
+			closePaymentDialog();
 		} catch (error) {
 			toast.error(
 				error instanceof Error
 					? error.message
 					: editingPaymentId
-						? "Không thể cập nhật thanh toán"
-						: "Không thể ghi nhận thanh toán",
+						? "Không thể cập nhật thanh toán theo đơn"
+						: "Không thể ghi nhận thanh toán theo đơn",
 			);
 		}
 	};
@@ -290,7 +390,11 @@ function DiscountDebtsPage() {
 							</TableHeader>
 							<TableBody>
 								{filteredDebts.map((debt) => (
-									<TableRow key={debt._id}>
+									<TableRow
+										key={debt._id}
+										onClick={() => openDebtDetailDialog(debt._id)}
+										className="cursor-pointer"
+									>
 										<TableCell>
 											<div>
 												<p className="font-medium">
@@ -299,6 +403,12 @@ function DiscountDebtsPage() {
 												<p className="text-muted-foreground text-xs">
 													Lưu bởi {debt.calculation?.savedBy ?? "-"}
 												</p>
+												{debt.legacyPaymentCount > 0 ? (
+													<p className="text-amber-700 text-xs">
+														Có {debt.legacyPaymentCount} thanh toán cũ cần tạo
+														lại snapshot
+													</p>
+												) : null}
 											</div>
 										</TableCell>
 										<TableCell>{debt.periodKey}</TableCell>
@@ -335,24 +445,17 @@ function DiscountDebtsPage() {
 											</div>
 										</TableCell>
 										<TableCell className="text-right">
-											<div className="flex justify-end gap-2">
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => openHistoryDialog(debt._id)}
-												>
-													<History className="mr-2 h-4 w-4" />
-													Lịch sử
-												</Button>
-												<Button
-													size="sm"
-													onClick={() => openPaymentDialog(debt._id)}
-													disabled={debt.remainingAmount <= 0}
-												>
-													<Wallet className="mr-2 h-4 w-4" />
-													Thanh toán
-												</Button>
-											</div>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={(event) => {
+													event.stopPropagation();
+													openDebtDetailDialog(debt._id);
+												}}
+											>
+												<FileText className="mr-2 h-4 w-4" />
+												Chi tiết
+											</Button>
 										</TableCell>
 									</TableRow>
 								))}
@@ -362,17 +465,219 @@ function DiscountDebtsPage() {
 				</CardContent>
 			</Card>
 
+			<Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+				<DialogContent className="sm:max-w-[1100px]">
+					<DialogHeader>
+						<DialogTitle>Chi tiết công nợ theo đơn hàng</DialogTitle>
+						<DialogDescription>
+							{selectedDebt?.salesmanNameSnapshot} - kỳ{" "}
+							{selectedDebt?.periodKey}
+						</DialogDescription>
+					</DialogHeader>
+					{debtOrderDetails === undefined ? (
+						<div className="py-8 text-center text-muted-foreground">
+							Đang tải chi tiết công nợ...
+						</div>
+					) : (
+						<div className="space-y-4">
+							{debtOrderDetails.legacyPaymentCount > 0 ? (
+								<Card className="border-amber-200 bg-amber-50/70">
+									<CardContent className="space-y-1 p-4 text-sm">
+										<p className="font-medium text-amber-700">
+											Snapshot này đang có {debtOrderDetails.legacyPaymentCount}{" "}
+											thanh toán cũ theo người nhận.
+										</p>
+										<p className="text-muted-foreground">
+											Tổng đã thanh toán kiểu cũ:{" "}
+											{formatCurrency(debtOrderDetails.legacyPaidAmount)}. Để
+											chuyển sang thanh toán theo từng đơn, hãy xóa công nợ
+											tháng và lưu lại bảng mới sau khi tính lại.
+										</p>
+									</CardContent>
+								</Card>
+							) : null}
+
+							<div className="grid gap-3 md:grid-cols-4">
+								{[
+									{ label: "Số đơn", value: debtOrderDetails.orders.length },
+									{
+										label: "Tổng phải chi",
+										value: formatCurrency(selectedDebt?.totalDebtAmount ?? 0),
+									},
+									{
+										label: "Đã thanh toán",
+										value: formatCurrency(selectedDebt?.paidAmount ?? 0),
+									},
+									{
+										label: "Còn lại",
+										value: formatCurrency(selectedDebt?.remainingAmount ?? 0),
+									},
+								].map((item) => (
+									<Card key={item.label}>
+										<CardContent className="p-3">
+											<p className="text-muted-foreground text-xs">
+												{item.label}
+											</p>
+											<p className="mt-1 font-semibold">{item.value}</p>
+										</CardContent>
+									</Card>
+								))}
+							</div>
+
+							{debtOrderDetails.orders.length === 0 ? (
+								<div className="py-8 text-center text-muted-foreground">
+									Snapshot này chưa có đơn hàng chiết khấu.
+								</div>
+							) : (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Đơn hàng</TableHead>
+											<TableHead>Chi tiết chiết khấu</TableHead>
+											<TableHead className="text-right">Tổng CK</TableHead>
+											<TableHead className="text-right">Đã trả</TableHead>
+											<TableHead className="text-right">Còn lại</TableHead>
+											<TableHead className="text-center">Trạng thái</TableHead>
+											<TableHead className="text-center">Lịch sử</TableHead>
+											<TableHead className="text-right">Thao tác</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{debtOrderDetails.orders.map((order: DebtOrderDetail) => (
+											<TableRow key={order.salesOrderId}>
+												<TableCell>
+													<div>
+														<p className="font-medium">{order.orderNumber}</p>
+														<p className="text-muted-foreground text-xs">
+															{order.customerNameSnapshot} - hoàn thành{" "}
+															{new Date(order.completedAt).toLocaleDateString(
+																"vi-VN",
+															)}
+														</p>
+														{order.latestPayment ? (
+															<p className="text-muted-foreground text-xs">
+																Thanh toán gần nhất{" "}
+																{new Date(
+																	order.latestPayment.paymentDate,
+																).toLocaleDateString("vi-VN")}{" "}
+																- {formatCurrency(order.latestPayment.amount)}
+															</p>
+														) : null}
+													</div>
+												</TableCell>
+												<TableCell>
+													<div className="space-y-2">
+														<div className="flex flex-wrap gap-2">
+															{Object.entries(order.byType)
+																.filter(([, value]) => value > 0)
+																.map(([type, value]) => (
+																	<Badge
+																		key={`${order.salesOrderId}-${type}`}
+																		variant="outline"
+																	>
+																		{
+																			discountBadgeLabels[
+																				type as DiscountTypeKey
+																			]
+																		}
+																		: {formatCurrency(value)}
+																	</Badge>
+																))}
+														</div>
+														<div className="space-y-1 text-xs">
+															{order.entryDetails.map((entry) => (
+																<p
+																	key={entry.salesOrderItemId}
+																	className="text-muted-foreground"
+																>
+																	{entry.productNameSnapshot} x{entry.quantity}{" "}
+																	- {discountBadgeLabels[entry.discountType]}{" "}
+																	{entry.allocatedPercent}% (
+																	{formatCurrency(entry.discountAmount)})
+																</p>
+															))}
+														</div>
+													</div>
+												</TableCell>
+												<TableCell className="text-right font-medium text-teal-700">
+													{formatCurrency(order.totalDiscountAmount)}
+												</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(order.paidAmount)}
+												</TableCell>
+												<TableCell className="text-right font-semibold text-rose-600">
+													{formatCurrency(order.remainingAmount)}
+												</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={
+															order.paymentStatus === "paid"
+																? "default"
+																: order.paymentStatus === "partial"
+																	? "secondary"
+																	: "outline"
+														}
+													>
+														{statusLabel[order.paymentStatus]}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-center">
+													{order.paymentCount}
+												</TableCell>
+												<TableCell className="text-right">
+													<div className="flex justify-end gap-2">
+														<Button
+															variant="outline"
+															size="sm"
+															onClick={() =>
+																openPaymentHistoryDialog(
+																	selectedDebt?._id ?? null,
+																	order,
+																)
+															}
+														>
+															<History className="mr-2 h-4 w-4" />
+															Lịch sử TT
+														</Button>
+														<Button
+															size="sm"
+															disabled={
+																!canManageOrderPayments ||
+																order.remainingAmount <= 0
+															}
+															onClick={() =>
+																openOrderPaymentDialog(
+																	selectedDebt?._id ?? null,
+																	order,
+																)
+															}
+														>
+															<Wallet className="mr-2 h-4 w-4" />
+															Thanh toán
+														</Button>
+													</div>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							)}
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+
 			<Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
 				<DialogContent className="sm:max-w-[520px]">
 					<DialogHeader>
 						<DialogTitle>
 							{editingPaymentId
-								? "Sửa thanh toán công nợ"
-								: "Ghi nhận thanh toán công nợ"}
+								? "Sửa thanh toán theo đơn"
+								: "Thanh toán theo đơn"}
 						</DialogTitle>
 						<DialogDescription>
-							{selectedDebt?.salesmanNameSnapshot} - còn lại{" "}
-							{formatCurrency(selectedDebt?.remainingAmount ?? 0)}
+							{selectedOrder?.orderNumber} - còn lại{" "}
+							{formatCurrency(selectedOrder?.remainingAmount ?? 0)}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
@@ -412,38 +717,35 @@ function DiscountDebtsPage() {
 						</div>
 					</div>
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => {
-								setPaymentDialogOpen(false);
-								setEditingPaymentId(null);
-							}}
-						>
+						<Button variant="outline" onClick={closePaymentDialog}>
 							Hủy
 						</Button>
-						<Button onClick={handleSubmitPayment}>
+						<Button onClick={handleSubmitOrderPayment}>
 							{editingPaymentId ? "Lưu thay đổi" : "Ghi nhận thanh toán"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
-			<Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
-				<DialogContent className="sm:max-w-[640px]">
+			<Dialog
+				open={paymentHistoryDialogOpen}
+				onOpenChange={setPaymentHistoryDialogOpen}
+			>
+				<DialogContent className="sm:max-w-[760px]">
 					<DialogHeader>
-						<DialogTitle>Lịch sử thanh toán</DialogTitle>
+						<DialogTitle>Lịch sử thanh toán theo đơn</DialogTitle>
 						<DialogDescription>
-							{selectedDebt?.salesmanNameSnapshot} - kỳ{" "}
-							{selectedDebt?.periodKey}
+							{selectedOrder?.orderNumber} -{" "}
+							{selectedOrder?.customerNameSnapshot}
 						</DialogDescription>
 					</DialogHeader>
-					{payments === undefined ? (
+					{orderPayments === undefined ? (
 						<div className="py-8 text-center text-muted-foreground">
-							Đang tải lịch sử...
+							Đang tải lịch sử thanh toán...
 						</div>
-					) : payments.length === 0 ? (
+					) : orderPayments.length === 0 ? (
 						<div className="py-8 text-center text-muted-foreground">
-							Chưa có thanh toán nào.
+							Đơn này chưa có thanh toán nào.
 						</div>
 					) : (
 						<div className="space-y-4">
@@ -452,18 +754,18 @@ function DiscountDebtsPage() {
 									<p className="text-muted-foreground text-xs">
 										Số lần thanh toán
 									</p>
-									<p className="font-semibold">{payments.length}</p>
+									<p className="font-semibold">{orderPayments.length}</p>
 								</div>
 								<div>
 									<p className="text-muted-foreground text-xs">Đã thanh toán</p>
 									<p className="font-semibold text-teal-700">
-										{formatCurrency(selectedDebt?.paidAmount ?? 0)}
+										{formatCurrency(selectedOrder?.paidAmount ?? 0)}
 									</p>
 								</div>
 								<div>
 									<p className="text-muted-foreground text-xs">Còn lại</p>
 									<p className="font-semibold text-rose-600">
-										{formatCurrency(selectedDebt?.remainingAmount ?? 0)}
+										{formatCurrency(selectedOrder?.remainingAmount ?? 0)}
 									</p>
 								</div>
 							</div>
@@ -479,7 +781,7 @@ function DiscountDebtsPage() {
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{payments.map((payment) => (
+									{orderPayments.map((payment: DebtOrderPayment) => (
 										<TableRow key={payment._id}>
 											<TableCell>
 												<div>
@@ -507,12 +809,8 @@ function DiscountDebtsPage() {
 												<Button
 													variant="outline"
 													size="sm"
-													onClick={() =>
-														openEditPaymentDialog(
-															selectedDebt?._id ?? null,
-															payment,
-														)
-													}
+													disabled={!canManageOrderPayments}
+													onClick={() => openEditOrderPaymentDialog(payment)}
 												>
 													<Pencil className="mr-2 h-4 w-4" />
 													Sửa

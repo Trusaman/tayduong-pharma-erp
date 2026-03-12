@@ -376,6 +376,9 @@ async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
 			.order("desc")
 			.take(5),
 	]);
+	const existingCalculationSummary = existingCalculation
+		? await getCalculationPaymentSummary(ctx, existingCalculation._id)
+		: null;
 
 	return {
 		period,
@@ -406,6 +409,7 @@ async function buildPreview(ctx: CalculationCtx, month: number, year: number) {
 			),
 		},
 		existingCalculation,
+		existingCalculationSummary,
 		recentRecalculations,
 	};
 }
@@ -423,12 +427,12 @@ async function assertCalculationHasNoPayments(
 		.collect();
 
 	for (const debt of debts) {
-		const payments = await ctx.db
-			.query("employeeDiscountDebtPayments")
-			.withIndex("by_debt", (q) => q.eq("debtId", debt._id))
-			.collect();
+		const [legacyPayments, orderPayments] = await Promise.all([
+			getLegacyDebtPayments(ctx, debt._id),
+			getDebtOrderPayments(ctx, debt._id),
+		]);
 
-		if (payments.length > 0) {
+		if (legacyPayments.length > 0 || orderPayments.length > 0) {
 			throw new ConvexError({
 				message: errorMessage,
 			});
@@ -473,6 +477,96 @@ function summarizeDebtPayments(
 	};
 }
 
+async function getLegacyDebtPayments(
+	ctx: CalculationCtx,
+	debtId: Id<"employeeDiscountDebts">,
+) {
+	return await ctx.db
+		.query("employeeDiscountDebtPayments")
+		.withIndex("by_debt", (q) => q.eq("debtId", debtId))
+		.collect();
+}
+
+async function getDebtOrderPayments(
+	ctx: CalculationCtx,
+	debtId: Id<"employeeDiscountDebts">,
+) {
+	return await ctx.db
+		.query("employeeDiscountDebtOrderPayments")
+		.withIndex("by_debt", (q) => q.eq("debtId", debtId))
+		.collect();
+}
+
+async function getCalculationPaymentSummary(
+	ctx: CalculationCtx,
+	calculationId: Id<"monthlyDiscountCalculations">,
+) {
+	const debts = await ctx.db
+		.query("employeeDiscountDebts")
+		.withIndex("by_calculation", (q) => q.eq("calculationId", calculationId))
+		.collect();
+
+	let legacyPaymentCount = 0;
+	let orderPaymentCount = 0;
+
+	for (const debt of debts) {
+		const [legacyPayments, orderPayments] = await Promise.all([
+			getLegacyDebtPayments(ctx, debt._id),
+			getDebtOrderPayments(ctx, debt._id),
+		]);
+		legacyPaymentCount += legacyPayments.length;
+		orderPaymentCount += orderPayments.length;
+	}
+
+	return {
+		debtCount: debts.length,
+		legacyPaymentCount,
+		orderPaymentCount,
+		totalPaymentCount: legacyPaymentCount + orderPaymentCount,
+	};
+}
+
+async function assertDebtUsesOrderLevelPayments(
+	ctx: MutationCtx,
+	debtId: Id<"employeeDiscountDebts">,
+) {
+	const legacyPayments = await getLegacyDebtPayments(ctx, debtId);
+	if (legacyPayments.length > 0) {
+		throw new ConvexError({
+			message:
+				"Công nợ này đang có thanh toán kiểu cũ theo người nhận. Hãy xóa bảng công nợ tháng và lưu lại bảng mới để chuyển sang thanh toán theo từng đơn.",
+		});
+	}
+}
+
+async function recomputeDebtFromOrderPayments(
+	ctx: MutationCtx,
+	debt: {
+		_id: Id<"employeeDiscountDebts">;
+		totalDebtAmount: number;
+	},
+	now: number,
+) {
+	const orderPayments = await getDebtOrderPayments(ctx, debt._id);
+	const paymentSummary = summarizeDebtPayments(
+		debt.totalDebtAmount,
+		orderPayments.map((payment) => ({
+			amount: payment.amount,
+			paymentDate: payment.paymentDate,
+		})),
+	);
+
+	await ctx.db.patch(debt._id, {
+		paidAmount: paymentSummary.paidAmount,
+		remainingAmount: paymentSummary.remainingAmount,
+		paymentStatus: paymentSummary.paymentStatus,
+		lastPaidAt: paymentSummary.lastPaidAt,
+		updatedAt: now,
+	});
+
+	return paymentSummary;
+}
+
 async function ensureReplaceableCalculation(
 	ctx: MutationCtx,
 	existingCalculationId: Id<"monthlyDiscountCalculations">,
@@ -495,6 +589,19 @@ async function ensureReplaceableCalculation(
 	}
 
 	for (const debt of debts) {
+		const [legacyPayments, orderPayments] = await Promise.all([
+			getLegacyDebtPayments(ctx, debt._id),
+			getDebtOrderPayments(ctx, debt._id),
+		]);
+
+		for (const payment of legacyPayments) {
+			await ctx.db.delete(payment._id);
+		}
+
+		for (const payment of orderPayments) {
+			await ctx.db.delete(payment._id);
+		}
+
 		await ctx.db.delete(debt._id);
 	}
 }
@@ -839,11 +946,11 @@ export const listDebts = query({
 					return right.remainingAmount - left.remainingAmount;
 				})
 				.map(async (debt) => {
-					const payments = await ctx.db
-						.query("employeeDiscountDebtPayments")
-						.withIndex("by_debt", (q) => q.eq("debtId", debt._id))
-						.collect();
-					const sortedPayments = payments.sort(
+					const [legacyPayments, orderPayments] = await Promise.all([
+						getLegacyDebtPayments(ctx, debt._id),
+						getDebtOrderPayments(ctx, debt._id),
+					]);
+					const sortedPayments = [...legacyPayments, ...orderPayments].sort(
 						(left, right) =>
 							right.paymentDate - left.paymentDate ||
 							right.createdAt - left.createdAt,
@@ -854,6 +961,7 @@ export const listDebts = query({
 						calculation: calculationById.get(debt.calculationId) ?? null,
 						paymentCount: sortedPayments.length,
 						latestPayment: sortedPayments[0] ?? null,
+						legacyPaymentCount: legacyPayments.length,
 					};
 				}),
 		);
@@ -1021,6 +1129,414 @@ export const updateDebtPayment = mutation({
 			paidAmount: paymentSummary.paidAmount,
 			remainingAmount: paymentSummary.remainingAmount,
 			paymentStatus: paymentSummary.paymentStatus,
+		};
+	},
+});
+
+export const getDebtOrderDetails = query({
+	args: { debtId: v.id("employeeDiscountDebts") },
+	handler: async (ctx, args) => {
+		const debt = await ctx.db.get(args.debtId);
+		if (!debt) {
+			throw new ConvexError({ message: "Không tìm thấy công nợ chiết khấu" });
+		}
+
+		const [entries, orderPayments, legacyPayments] = await Promise.all([
+			ctx.db
+				.query("monthlyDiscountCalculationEntries")
+				.withIndex("by_calculation_and_salesman", (q) =>
+					q
+						.eq("calculationId", debt.calculationId)
+						.eq("salesmanId", debt.salesmanId),
+				)
+				.collect(),
+			getDebtOrderPayments(ctx, debt._id),
+			getLegacyDebtPayments(ctx, debt._id),
+		]);
+
+		const paymentsByOrderId = new Map<string, typeof orderPayments>();
+		for (const payment of orderPayments) {
+			const key = String(payment.salesOrderId);
+			const current = paymentsByOrderId.get(key);
+			if (current) {
+				current.push(payment);
+			} else {
+				paymentsByOrderId.set(key, [payment]);
+			}
+		}
+
+		const ordersById = new Map<
+			string,
+			{
+				salesOrderId: Id<"salesOrders">;
+				orderNumber: string;
+				orderDate: number;
+				completedAt: number;
+				customerNameSnapshot: string;
+				totalDiscountAmount: number;
+				byType: RecipientByType;
+				entryDetails: Array<{
+					salesOrderItemId: Id<"salesOrderItems">;
+					productNameSnapshot: string;
+					quantity: number;
+					discountType: DiscountTypeKey;
+					ruleName: string;
+					allocatedPercent: number;
+					discountAmount: number;
+				}>;
+			}
+		>();
+
+		for (const entry of entries) {
+			const key = String(entry.salesOrderId);
+			const existing = ordersById.get(key);
+			if (existing) {
+				existing.totalDiscountAmount = roundMoney(
+					existing.totalDiscountAmount + entry.discountAmount,
+				);
+				existing.byType[entry.discountType] = roundMoney(
+					existing.byType[entry.discountType] + entry.discountAmount,
+				);
+				existing.entryDetails.push({
+					salesOrderItemId: entry.salesOrderItemId,
+					productNameSnapshot: entry.productNameSnapshot,
+					quantity: entry.quantity,
+					discountType: entry.discountType,
+					ruleName: entry.ruleName,
+					allocatedPercent: entry.allocatedPercent,
+					discountAmount: entry.discountAmount,
+				});
+				continue;
+			}
+
+			const byType = createEmptyByType();
+			byType[entry.discountType] = entry.discountAmount;
+			ordersById.set(key, {
+				salesOrderId: entry.salesOrderId,
+				orderNumber: entry.orderNumber,
+				orderDate: entry.orderDate,
+				completedAt: entry.completedAt,
+				customerNameSnapshot: entry.customerNameSnapshot,
+				totalDiscountAmount: entry.discountAmount,
+				byType,
+				entryDetails: [
+					{
+						salesOrderItemId: entry.salesOrderItemId,
+						productNameSnapshot: entry.productNameSnapshot,
+						quantity: entry.quantity,
+						discountType: entry.discountType,
+						ruleName: entry.ruleName,
+						allocatedPercent: entry.allocatedPercent,
+						discountAmount: entry.discountAmount,
+					},
+				],
+			});
+		}
+
+		const orders = Array.from(ordersById.values())
+			.map((order) => {
+				const payments = [
+					...(paymentsByOrderId.get(String(order.salesOrderId)) ?? []),
+				].sort(
+					(left, right) =>
+						right.paymentDate - left.paymentDate ||
+						right.createdAt - left.createdAt,
+				);
+				const paymentSummary = summarizeDebtPayments(
+					order.totalDiscountAmount,
+					payments.map((payment) => ({
+						amount: payment.amount,
+						paymentDate: payment.paymentDate,
+					})),
+				);
+
+				return {
+					...order,
+					paymentCount: payments.length,
+					paidAmount: paymentSummary.paidAmount,
+					remainingAmount: paymentSummary.remainingAmount,
+					paymentStatus: paymentSummary.paymentStatus,
+					lastPaidAt: paymentSummary.lastPaidAt,
+					latestPayment: payments[0] ?? null,
+				};
+			})
+			.sort((left, right) => {
+				if (right.completedAt !== left.completedAt) {
+					return right.completedAt - left.completedAt;
+				}
+				return right.totalDiscountAmount - left.totalDiscountAmount;
+			});
+
+		return {
+			debt,
+			legacyPaymentCount: legacyPayments.length,
+			legacyPaidAmount: roundMoney(
+				legacyPayments.reduce((sum, payment) => sum + payment.amount, 0),
+			),
+			orders,
+		};
+	},
+});
+
+export const getDebtOrderPaymentHistory = query({
+	args: {
+		debtId: v.id("employeeDiscountDebts"),
+		salesOrderId: v.id("salesOrders"),
+	},
+	handler: async (ctx, args) => {
+		const payments = await ctx.db
+			.query("employeeDiscountDebtOrderPayments")
+			.withIndex("by_debt_and_order", (q) =>
+				q.eq("debtId", args.debtId).eq("salesOrderId", args.salesOrderId),
+			)
+			.collect();
+
+		return payments.sort(
+			(left, right) =>
+				right.paymentDate - left.paymentDate ||
+				right.createdAt - left.createdAt,
+		);
+	},
+});
+
+export const recordDebtOrderPayment = mutation({
+	args: {
+		debtId: v.id("employeeDiscountDebts"),
+		salesOrderId: v.id("salesOrders"),
+		amount: v.number(),
+		paymentDate: v.number(),
+		paidBy: v.string(),
+		notes: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const debt = await ctx.db.get(args.debtId);
+		if (!debt) {
+			throw new ConvexError({ message: "Không tìm thấy công nợ chiết khấu" });
+		}
+
+		await assertDebtUsesOrderLevelPayments(ctx, debt._id);
+
+		if (!Number.isFinite(args.amount) || args.amount <= 0) {
+			throw new ConvexError({ message: "Số tiền thanh toán phải lớn hơn 0" });
+		}
+
+		if (!Number.isFinite(args.paymentDate)) {
+			throw new ConvexError({ message: "Ngày thanh toán không hợp lệ" });
+		}
+
+		const paidBy = args.paidBy.trim();
+		if (!paidBy) {
+			throw new ConvexError({
+				message: "Vui lòng nhập người thực hiện thanh toán",
+			});
+		}
+
+		const orderEntries = await ctx.db
+			.query("monthlyDiscountCalculationEntries")
+			.withIndex("by_calculation_and_salesman", (q) =>
+				q
+					.eq("calculationId", debt.calculationId)
+					.eq("salesmanId", debt.salesmanId),
+			)
+			.collect();
+		const selectedEntries = orderEntries.filter(
+			(entry) => entry.salesOrderId === args.salesOrderId,
+		);
+
+		if (selectedEntries.length === 0) {
+			throw new ConvexError({
+				message: "Không tìm thấy đơn hàng trong snapshot công nợ này.",
+			});
+		}
+
+		const orderTotalAmount = roundMoney(
+			selectedEntries.reduce((sum, entry) => sum + entry.discountAmount, 0),
+		);
+		const existingPayments = await ctx.db
+			.query("employeeDiscountDebtOrderPayments")
+			.withIndex("by_debt_and_order", (q) =>
+				q.eq("debtId", debt._id).eq("salesOrderId", args.salesOrderId),
+			)
+			.collect();
+		const amount = roundMoney(args.amount);
+		summarizeDebtPayments(orderTotalAmount, [
+			...existingPayments.map((payment) => ({
+				amount: payment.amount,
+				paymentDate: payment.paymentDate,
+			})),
+			{ amount, paymentDate: args.paymentDate },
+		]);
+
+		const now = Date.now();
+		const paymentId = await ctx.db.insert("employeeDiscountDebtOrderPayments", {
+			debtId: debt._id,
+			calculationId: debt.calculationId,
+			periodKey: debt.periodKey,
+			salesmanId: debt.salesmanId,
+			salesOrderId: args.salesOrderId,
+			orderNumberSnapshot: selectedEntries[0].orderNumber,
+			amount,
+			paymentDate: args.paymentDate,
+			paidBy,
+			notes: args.notes?.trim() ? args.notes.trim() : undefined,
+			createdAt: now,
+		});
+
+		const paymentSummary = await recomputeDebtFromOrderPayments(ctx, debt, now);
+
+		return {
+			paymentId,
+			paidAmount: paymentSummary.paidAmount,
+			remainingAmount: paymentSummary.remainingAmount,
+			paymentStatus: paymentSummary.paymentStatus,
+		};
+	},
+});
+
+export const updateDebtOrderPayment = mutation({
+	args: {
+		paymentId: v.id("employeeDiscountDebtOrderPayments"),
+		amount: v.number(),
+		paymentDate: v.number(),
+		paidBy: v.string(),
+		notes: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const payment = await ctx.db.get(args.paymentId);
+		if (!payment) {
+			throw new ConvexError({ message: "Không tìm thấy thanh toán theo đơn" });
+		}
+
+		const debt = await ctx.db.get(payment.debtId);
+		if (!debt) {
+			throw new ConvexError({ message: "Không tìm thấy công nợ chiết khấu" });
+		}
+
+		await assertDebtUsesOrderLevelPayments(ctx, debt._id);
+
+		if (!Number.isFinite(args.amount) || args.amount <= 0) {
+			throw new ConvexError({ message: "Số tiền thanh toán phải lớn hơn 0" });
+		}
+
+		if (!Number.isFinite(args.paymentDate)) {
+			throw new ConvexError({ message: "Ngày thanh toán không hợp lệ" });
+		}
+
+		const paidBy = args.paidBy.trim();
+		if (!paidBy) {
+			throw new ConvexError({
+				message: "Vui lòng nhập người thực hiện thanh toán",
+			});
+		}
+
+		const orderEntries = await ctx.db
+			.query("monthlyDiscountCalculationEntries")
+			.withIndex("by_calculation_and_salesman", (q) =>
+				q
+					.eq("calculationId", debt.calculationId)
+					.eq("salesmanId", debt.salesmanId),
+			)
+			.collect();
+		const selectedEntries = orderEntries.filter(
+			(entry) => entry.salesOrderId === payment.salesOrderId,
+		);
+		if (selectedEntries.length === 0) {
+			throw new ConvexError({
+				message:
+					"Đơn hàng này không còn tồn tại trong snapshot công nợ hiện tại.",
+			});
+		}
+
+		const orderTotalAmount = roundMoney(
+			selectedEntries.reduce((sum, entry) => sum + entry.discountAmount, 0),
+		);
+
+		const existingPayments = await ctx.db
+			.query("employeeDiscountDebtOrderPayments")
+			.withIndex("by_debt_and_order", (q) =>
+				q.eq("debtId", debt._id).eq("salesOrderId", payment.salesOrderId),
+			)
+			.collect();
+		const amount = roundMoney(args.amount);
+		summarizeDebtPayments(
+			orderTotalAmount,
+			existingPayments.map((currentPayment) =>
+				currentPayment._id === payment._id
+					? { amount, paymentDate: args.paymentDate }
+					: {
+							amount: currentPayment.amount,
+							paymentDate: currentPayment.paymentDate,
+						},
+			),
+		);
+
+		const now = Date.now();
+		await ctx.db.patch(payment._id, {
+			amount,
+			paymentDate: args.paymentDate,
+			paidBy,
+			notes: args.notes?.trim() ? args.notes.trim() : undefined,
+			updatedAt: now,
+		});
+
+		const paymentSummary = await recomputeDebtFromOrderPayments(ctx, debt, now);
+
+		return {
+			paymentId: payment._id,
+			paidAmount: paymentSummary.paidAmount,
+			remainingAmount: paymentSummary.remainingAmount,
+			paymentStatus: paymentSummary.paymentStatus,
+		};
+	},
+});
+
+export const deleteMonthlyCalculation = mutation({
+	args: { calculationId: v.id("monthlyDiscountCalculations") },
+	handler: async (ctx, args) => {
+		const calculation = await ctx.db.get(args.calculationId);
+		if (!calculation) {
+			throw new ConvexError({ message: "Không tìm thấy bảng công nợ tháng" });
+		}
+
+		const [entries, debts] = await Promise.all([
+			ctx.db
+				.query("monthlyDiscountCalculationEntries")
+				.withIndex("by_calculation", (q) =>
+					q.eq("calculationId", args.calculationId),
+				)
+				.collect(),
+			ctx.db
+				.query("employeeDiscountDebts")
+				.withIndex("by_calculation", (q) =>
+					q.eq("calculationId", args.calculationId),
+				)
+				.collect(),
+		]);
+		const paymentSummary = await getCalculationPaymentSummary(
+			ctx,
+			calculation._id,
+		);
+
+		if (paymentSummary.totalPaymentCount > 0) {
+			throw new ConvexError({
+				message:
+					"Bảng công nợ này đã có thanh toán, không thể xóa. Hãy đối soát hoặc tạo kỳ mới thay vì xóa snapshot hiện tại.",
+			});
+		}
+
+		for (const debt of debts) {
+			await ctx.db.delete(debt._id);
+		}
+
+		for (const entry of entries) {
+			await ctx.db.delete(entry._id);
+		}
+
+		await ctx.db.delete(calculation._id);
+
+		return {
+			calculationId: calculation._id,
+			periodKey: calculation.periodKey,
 		};
 	},
 });
