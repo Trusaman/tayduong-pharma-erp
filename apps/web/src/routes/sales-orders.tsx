@@ -6,6 +6,7 @@ import {
 	CheckCircle,
 	ClipboardList,
 	Eye,
+	Pencil,
 	Plus,
 	Search,
 	Trash2,
@@ -24,7 +25,6 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,12 +74,14 @@ function createOrderItem(): OrderItem {
 
 function SalesOrdersPage() {
 	const [search, setSearch] = useState("");
-	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+	const [formDialogOpen, setFormDialogOpen] = useState(false);
 	const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 	const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+	const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 	const [customerId, setCustomerId] = useState("");
 	const [salesmanId, setSalesmanId] = useState("");
 	const [notes, setNotes] = useState("");
+	const [updatedByName, setUpdatedByName] = useState("");
 	const [items, setItems] = useState<OrderItem[]>(() => [createOrderItem()]);
 
 	// Status‑change dialog state
@@ -113,6 +115,10 @@ function SalesOrdersPage() {
 		api.salesOrders.getWithDetails,
 		selectedOrderId ? { id: selectedOrderId as Id<"salesOrders"> } : "skip",
 	);
+	const editingOrderDetails = useQuery(
+		api.salesOrders.getWithDetails,
+		editingOrderId ? { id: editingOrderId as Id<"salesOrders"> } : "skip",
+	);
 	const employees = useQuery(api.employees.list, {});
 	const statusLogs = useQuery(
 		api.salesOrders.getStatusLogs,
@@ -121,13 +127,17 @@ function SalesOrdersPage() {
 			: "skip",
 	);
 	const createOrder = useMutation(api.salesOrders.create);
+	const updateOrder = useMutation(api.salesOrders.update);
 	const updateStatus = useMutation(api.salesOrders.updateStatus);
 	const deleteOrder = useMutation(api.salesOrders.remove);
+	const isEditingOrder = editingOrderId !== null;
+	const editingOrderHasFulfilledItems =
+		editingOrderDetails?.items.some((item) => item.fulfilledQuantity > 0) ?? false;
 
 	const filteredOrders = orders?.filter(
 		(o) =>
 			o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
-			o.customer?.name.toLowerCase().includes(search.toLowerCase()),
+			(o.customer?.name ?? "").toLowerCase().includes(search.toLowerCase()),
 	);
 
 	const handleAddItem = () => {
@@ -181,7 +191,33 @@ function SalesOrdersPage() {
 		});
 	}, [applicableDiscounts]);
 
-	const handleCreateOrder = async (e: React.FormEvent) => {
+	useEffect(() => {
+		if (!editingOrderDetails || !editingOrderId) {
+			return;
+		}
+
+		setCustomerId(editingOrderDetails.customerId);
+		setSalesmanId(editingOrderDetails.salesmanId ?? "");
+		setNotes(editingOrderDetails.notes ?? "");
+		setUpdatedByName("");
+		setItems(
+			editingOrderDetails.items.length > 0
+				? editingOrderDetails.items.map((item) => ({
+					...createOrderItem(),
+					productId: item.productId,
+					quantity: String(item.quantity),
+					unitPrice: String(item.baseUnitPrice ?? item.unitPrice),
+					discountPercent:
+						item.discountPercent !== undefined
+							? String(item.discountPercent)
+							: "",
+					hasManualDiscount: item.discountPercent !== undefined,
+				}))
+				: [createOrderItem()],
+		);
+	}, [editingOrderDetails, editingOrderId]);
+
+	const handleOrderSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
 			const validItems = items.filter(
@@ -192,7 +228,7 @@ function SalesOrdersPage() {
 				return;
 			}
 
-			await createOrder({
+			const payload = {
 				customerId: customerId as Id<"customers">,
 				salesmanId: salesmanId ? (salesmanId as Id<"salesmen">) : undefined,
 				items: validItems.map((item) => ({
@@ -205,12 +241,36 @@ function SalesOrdersPage() {
 							: undefined,
 				})),
 				notes: notes || undefined,
-			});
-			toast.success("Đã tạo đơn bán hàng thành công");
-			setCreateDialogOpen(false);
+			};
+
+			if (editingOrderId) {
+				if (!updatedByName.trim()) {
+					toast.error("Vui lòng nhập tên người sửa đơn");
+					return;
+				}
+
+				await updateOrder({
+					id: editingOrderId as Id<"salesOrders">,
+					...payload,
+					updatedByName: updatedByName.trim(),
+				});
+				toast.success("Đã cập nhật đơn bán hàng thành công");
+			} else {
+				await createOrder(payload);
+				toast.success("Đã tạo đơn bán hàng thành công");
+			}
+
+			setFormDialogOpen(false);
+			setEditingOrderId(null);
 			resetForm();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Không thể tạo đơn");
+			toast.error(
+				error instanceof Error
+					? error.message
+					: isEditingOrder
+						? "Không thể cập nhật đơn"
+						: "Không thể tạo đơn",
+			);
 		}
 	};
 
@@ -264,7 +324,16 @@ function SalesOrdersPage() {
 		setCustomerId("");
 		setSalesmanId("");
 		setNotes("");
+		setUpdatedByName("");
 		setItems([createOrderItem()]);
+	};
+
+	const handleFormDialogChange = (open: boolean) => {
+		setFormDialogOpen(open);
+		if (!open) {
+			setEditingOrderId(null);
+			resetForm();
+		}
 	};
 
 	const getAutoDiscountPercent = (productId: string) => {
@@ -288,6 +357,21 @@ function SalesOrdersPage() {
 
 	const formatDateTime = (timestamp: number) => {
 		return new Date(timestamp).toLocaleString("vi-VN");
+	};
+
+	const getEditFieldLabel = (field: string) => {
+		const labels: Record<string, string> = {
+			customer: "Khách hàng",
+			salesman: "Nhân viên bán hàng",
+			items: "Danh sách sản phẩm",
+			notes: "Ghi chú",
+		};
+
+		return labels[field] ?? field;
+	};
+
+	const getHistoryValue = (value: string | undefined) => {
+		return value?.trim() ? value : "Không có";
 	};
 
 	const getStatusBadge = (status: string) => {
@@ -331,6 +415,11 @@ function SalesOrdersPage() {
 		setDetailDialogOpen(true);
 	};
 
+	const handleEditOrder = (orderId: string) => {
+		setEditingOrderId(orderId);
+		setFormDialogOpen(true);
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -340,22 +429,56 @@ function SalesOrdersPage() {
 						Quản lý đơn bán hàng cho khách
 					</p>
 				</div>
-				<Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-					<DialogTrigger asChild>
-						<Button onClick={resetForm}>
-							<Plus className="mr-2 h-4 w-4" />
-							Tạo đơn
-						</Button>
-					</DialogTrigger>
+				<Button
+					onClick={() => {
+						setEditingOrderId(null);
+						resetForm();
+						setFormDialogOpen(true);
+					}}
+				>
+					<Plus className="mr-2 h-4 w-4" />
+					Tạo đơn
+				</Button>
+				<Dialog open={formDialogOpen} onOpenChange={handleFormDialogChange}>
 					<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[800px]">
-						<form onSubmit={handleCreateOrder}>
+						{isEditingOrder && !editingOrderDetails ? (
+							<div className="py-10 text-center text-muted-foreground">
+								Đang tải dữ liệu đơn hàng...
+							</div>
+						) : (
+							<form onSubmit={handleOrderSubmit}>
 							<DialogHeader>
-								<DialogTitle>Tạo đơn bán hàng</DialogTitle>
+								<DialogTitle>
+									{isEditingOrder ? "Sửa đơn bán hàng" : "Tạo đơn bán hàng"}
+								</DialogTitle>
 								<DialogDescription>
-									Tạo đơn bán hàng mới cho khách.
+									{isEditingOrder
+										? "Cập nhật thông tin đơn bán hàng hiện tại."
+										: "Tạo đơn bán hàng mới cho khách."}
 								</DialogDescription>
 							</DialogHeader>
 							<div className="grid gap-4 py-4">
+								{isEditingOrder && (
+									<>
+										<div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+											<p className="font-medium">Thông tin chỉnh sửa</p>
+											<p className="mt-1">
+												{editingOrderHasFulfilledItems
+													? "Đơn đã có giao hàng nên chỉ cho sửa ghi chú. Các trường cấu trúc được khóa để tránh lệch tồn kho và đối soát."
+													: "Bạn có thể sửa toàn bộ thông tin đơn và hệ thống sẽ lưu lịch sử thay đổi. Ô %CK đang giữ theo giá trị hiện tại; xóa ô này nếu muốn áp dụng lại chiết khấu tự động."}
+											</p>
+										</div>
+										<div className="space-y-2">
+											<Label>Người sửa đơn *</Label>
+											<Input
+												value={updatedByName}
+												onChange={(e) => setUpdatedByName(e.target.value)}
+												placeholder="Nhập tên người sửa"
+												required
+											/>
+										</div>
+									</>
+								)}
 								<div className="grid grid-cols-2 gap-4">
 									<div className="space-y-2">
 										<Label>Khách hàng *</Label>
@@ -363,6 +486,7 @@ function SalesOrdersPage() {
 											value={customerId}
 											onValueChange={(v) => v && setCustomerId(v)}
 											required
+											disabled={editingOrderHasFulfilledItems}
 										>
 											<SelectTrigger>
 												<SelectValue placeholder="Chọn khách hàng">
@@ -387,6 +511,7 @@ function SalesOrdersPage() {
 											value={salesmanId}
 											onValueChange={(v) => v && setSalesmanId(v)}
 											required
+											disabled={editingOrderHasFulfilledItems}
 										>
 											<SelectTrigger>
 												<SelectValue placeholder="Chọn nhân viên">
@@ -415,6 +540,7 @@ function SalesOrdersPage() {
 											variant="outline"
 											size="sm"
 											onClick={handleAddItem}
+											disabled={editingOrderHasFulfilledItems}
 										>
 											<Plus className="mr-1 h-4 w-4" /> Thêm sản phẩm
 										</Button>
@@ -459,6 +585,7 @@ function SalesOrdersPage() {
 																);
 															}
 														}}
+														disabled={editingOrderHasFulfilledItems}
 													>
 														<SelectTrigger className="h-10">
 															<SelectValue placeholder="Sản phẩm">
@@ -492,6 +619,7 @@ function SalesOrdersPage() {
 														}
 														className="h-10"
 														min="1"
+														disabled={editingOrderHasFulfilledItems}
 													/>
 												</div>
 												<div className="col-span-2">
@@ -508,6 +636,7 @@ function SalesOrdersPage() {
 														}
 														className="h-10"
 														min="0"
+														disabled={editingOrderHasFulfilledItems}
 													/>
 												</div>
 												{/* Discount % input */}
@@ -537,10 +666,11 @@ function SalesOrdersPage() {
 																	return nextItems;
 																});
 															}}
-															className="h-10 pr-6"
-															min="0"
-															max="100"
-														/>
+														className="h-10 pr-6"
+														min="0"
+														max="100"
+														disabled={editingOrderHasFulfilledItems}
+													/>
 														<span className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground text-xs">
 															%
 														</span>
@@ -570,7 +700,7 @@ function SalesOrdersPage() {
 														size="icon"
 														className="h-8 w-8 shrink-0"
 														onClick={() => handleRemoveItem(index)}
-														disabled={items.length === 1}
+														disabled={items.length === 1 || editingOrderHasFulfilledItems}
 													>
 														<Trash2 className="h-4 w-4 text-destructive" />
 													</Button>
@@ -646,9 +776,12 @@ function SalesOrdersPage() {
 								</div>
 							</div>
 							<DialogFooter>
-								<Button type="submit">Tạo đơn</Button>
+								<Button type="submit">
+									{isEditingOrder ? "Lưu thay đổi" : "Tạo đơn"}
+								</Button>
 							</DialogFooter>
 						</form>
+						)}
 					</DialogContent>
 				</Dialog>
 			</div>
@@ -713,6 +846,14 @@ function SalesOrdersPage() {
 											{getStatusBadge(order.status)}
 										</TableCell>
 										<TableCell className="text-right">
+											<Button
+												variant="ghost"
+												size="icon"
+												title="Sửa đơn"
+												onClick={() => handleEditOrder(order._id)}
+											>
+												<Pencil className="h-4 w-4 text-amber-600" />
+											</Button>
 											<Button
 												variant="ghost"
 												size="icon"
@@ -939,6 +1080,64 @@ function SalesOrdersPage() {
 											</li>
 										))}
 									</ol>
+								)}
+							</div>
+
+							<div>
+								<p className="mb-3 font-medium text-sm">Lịch sử chỉnh sửa</p>
+								{orderDetails.editHistory && orderDetails.editHistory.length > 0 ? (
+									<div className="space-y-3">
+										{[...orderDetails.editHistory]
+											.sort((left, right) => right.editedAt - left.editedAt)
+											.map((entry, entryIndex) => (
+												<div
+													key={`${entry.editedAt}-${entry.editedBy}-${entryIndex}`}
+													className="rounded-lg border bg-card p-4 shadow-sm"
+												>
+													<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+														<div className="flex items-center gap-2">
+															<Badge variant="secondary">Người sửa</Badge>
+															<div className="font-medium text-sm">{entry.editedBy}</div>
+														</div>
+														<div className="text-muted-foreground text-xs">
+															{formatDateTime(entry.editedAt)}
+														</div>
+													</div>
+													<div className="mt-3 space-y-3">
+														{entry.changes.map((change, changeIndex) => (
+															<div
+																key={`${change.field}-${changeIndex}`}
+																className="rounded-md border bg-muted/30 p-3 text-sm"
+															>
+																<Badge variant="outline">
+																	{getEditFieldLabel(change.field)}
+																</Badge>
+																<div className="mt-3 grid gap-2 sm:grid-cols-2">
+																	<div className="rounded-md border border-dashed border-muted-foreground/30 bg-background p-3">
+																		<div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+																			Từ
+																		</div>
+																		<div className="mt-1 whitespace-pre-wrap break-words text-xs">
+																			{getHistoryValue(change.from)}
+																		</div>
+																	</div>
+																	<div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+																		<div className="text-[11px] uppercase tracking-wide text-primary">
+																			Thành
+																		</div>
+																		<div className="mt-1 whitespace-pre-wrap break-words text-xs">
+																			{getHistoryValue(change.to)}
+																		</div>
+																	</div>
+																</div>
+															</div>
+														))}
+													</div>
+												</div>
+											))}
+									</div>
+								) : (
+									<p className="text-muted-foreground text-sm">Chưa có lịch sử chỉnh sửa.</p>
 								)}
 							</div>
 						</div>

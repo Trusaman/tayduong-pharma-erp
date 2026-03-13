@@ -27,6 +27,7 @@ const navigation = [
 	{ name: "Nhà cung cấp", href: "/suppliers", icon: Users },
 	{ name: "Khách hàng", href: "/customers", icon: UserCircle },
 	{ name: "Nhân viên", href: "/employees", icon: UserCheck },
+	{ name: "Người nhận CK", href: "/discount-recipients", icon: Users },
 	{ name: "Đơn nhập", href: "/purchase-orders", icon: ShoppingCart },
 	{ name: "Đơn bán", href: "/sales-orders", icon: ClipboardList },
 	{ name: "Chiết khấu", href: "/discounts", icon: BadgePercent },

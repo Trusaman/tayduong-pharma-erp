@@ -17,6 +17,7 @@ import { Route as ProductsRouteImport } from './routes/products'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as EmployeesRouteImport } from './routes/employees'
 import { Route as DiscountsRouteImport } from './routes/discounts'
+import { Route as DiscountRecipientsRouteImport } from './routes/discount-recipients'
 import { Route as DiscountDebtsRouteImport } from './routes/discount-debts'
 import { Route as DiscountCalculationsRouteImport } from './routes/discount-calculations'
 import { Route as DashboardRouteImport } from './routes/dashboard'
@@ -64,6 +65,11 @@ const DiscountsRoute = DiscountsRouteImport.update({
   path: '/discounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DiscountRecipientsRoute = DiscountRecipientsRouteImport.update({
+  id: '/discount-recipients',
+  path: '/discount-recipients',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DiscountDebtsRoute = DiscountDebtsRouteImport.update({
   id: '/discount-debts',
   path: '/discount-debts',
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
   '/discount-debts': typeof DiscountDebtsRoute
+  '/discount-recipients': typeof DiscountRecipientsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -117,6 +124,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
   '/discount-debts': typeof DiscountDebtsRoute
+  '/discount-recipients': typeof DiscountRecipientsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
   '/discount-debts': typeof DiscountDebtsRoute
+  '/discount-recipients': typeof DiscountRecipientsRoute
   '/discounts': typeof DiscountsRoute
   '/employees': typeof EmployeesRoute
   '/inventory': typeof InventoryRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/discount-calculations'
     | '/discount-debts'
+    | '/discount-recipients'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/discount-calculations'
     | '/discount-debts'
+    | '/discount-recipients'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/discount-calculations'
     | '/discount-debts'
+    | '/discount-recipients'
     | '/discounts'
     | '/employees'
     | '/inventory'
@@ -201,6 +213,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   DiscountCalculationsRoute: typeof DiscountCalculationsRoute
   DiscountDebtsRoute: typeof DiscountDebtsRoute
+  DiscountRecipientsRoute: typeof DiscountRecipientsRoute
   DiscountsRoute: typeof DiscountsRoute
   EmployeesRoute: typeof EmployeesRoute
   InventoryRoute: typeof InventoryRoute
@@ -270,6 +283,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DiscountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/discount-recipients': {
+      id: '/discount-recipients'
+      path: '/discount-recipients'
+      fullPath: '/discount-recipients'
+      preLoaderRoute: typeof DiscountRecipientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/discount-debts': {
       id: '/discount-debts'
       path: '/discount-debts'
@@ -321,6 +341,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   DiscountCalculationsRoute: DiscountCalculationsRoute,
   DiscountDebtsRoute: DiscountDebtsRoute,
+  DiscountRecipientsRoute: DiscountRecipientsRoute,
   DiscountsRoute: DiscountsRoute,
   EmployeesRoute: EmployeesRoute,
   InventoryRoute: InventoryRoute,

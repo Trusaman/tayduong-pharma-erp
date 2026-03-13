@@ -14,6 +14,7 @@ import type * as customers from "../customers.js";
 import type * as dashboard from "../dashboard.js";
 import type * as discountCalculationUtils from "../discountCalculationUtils.js";
 import type * as discountCalculations from "../discountCalculations.js";
+import type * as discountRecipients from "../discountRecipients.js";
 import type * as discounts from "../discounts.js";
 import type * as employees from "../employees.js";
 import type * as healthCheck from "../healthCheck.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   dashboard: typeof dashboard;
   discountCalculationUtils: typeof discountCalculationUtils;
   discountCalculations: typeof discountCalculations;
+  discountRecipients: typeof discountRecipients;
   discounts: typeof discounts;
   employees: typeof employees;
   healthCheck: typeof healthCheck;

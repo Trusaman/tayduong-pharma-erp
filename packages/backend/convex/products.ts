@@ -1,6 +1,12 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
+const pickDefined = <T extends Record<string, unknown>>(input: T) => {
+	return Object.fromEntries(
+		Object.entries(input).filter(([, value]) => value !== undefined),
+	) as Partial<T>;
+};
+
 export const list = query({
 	args: {
 		activeOnly: v.optional(v.boolean()),
@@ -49,8 +55,42 @@ export const create = mutation({
 		name: v.string(),
 		sku: v.string(),
 		categoryId: v.optional(v.id("categories")),
+		productType: v.optional(
+			v.union(
+				v.literal("thuoc"),
+				v.literal("vtyt"),
+				v.literal("tpcn"),
+				v.literal("khac"),
+			),
+		),
+		activeIngredient: v.optional(v.string()),
+		strength: v.optional(v.string()),
+		administrationRoute: v.optional(v.string()),
+		dosageForm: v.optional(v.string()),
+		packagingSpecification: v.optional(v.string()),
+		drugGroup: v.optional(v.string()),
+		shelfLife: v.optional(v.string()),
+		registrationNumber: v.optional(v.string()),
+		registrationExpiryDate: v.optional(v.number()),
+		manufacturer: v.optional(v.string()),
+		countryOfOrigin: v.optional(v.string()),
 		description: v.optional(v.string()),
 		unit: v.string(),
+		declarationDate: v.optional(v.number()),
+		declarationUnit: v.optional(v.string()),
+		declarationDecisionNumber: v.optional(v.string()),
+		declarationValidity: v.optional(v.string()),
+		biddingUnit: v.optional(v.string()),
+		indication: v.optional(v.string()),
+		prescriptionType: v.optional(
+			v.union(
+				v.literal("prescription"),
+				v.literal("non_prescription"),
+				v.literal("other"),
+			),
+		),
+		vatRate: v.optional(v.number()),
+		isActive: v.optional(v.boolean()),
 		purchasePrice: v.number(),
 		salePrice: v.number(),
 		minStock: v.number(),
@@ -70,13 +110,63 @@ export const create = mutation({
 		return await ctx.db.insert("products", {
 			name: args.name,
 			sku: args.sku,
-			categoryId: args.categoryId,
-			description: args.description,
+			...(args.categoryId !== undefined ? { categoryId: args.categoryId } : {}),
+			...(args.productType !== undefined
+				? { productType: args.productType }
+				: {}),
+			...(args.activeIngredient !== undefined
+				? { activeIngredient: args.activeIngredient }
+				: {}),
+			...(args.strength !== undefined ? { strength: args.strength } : {}),
+			...(args.administrationRoute !== undefined
+				? { administrationRoute: args.administrationRoute }
+				: {}),
+			...(args.dosageForm !== undefined ? { dosageForm: args.dosageForm } : {}),
+			...(args.packagingSpecification !== undefined
+				? { packagingSpecification: args.packagingSpecification }
+				: {}),
+			...(args.drugGroup !== undefined ? { drugGroup: args.drugGroup } : {}),
+			...(args.shelfLife !== undefined ? { shelfLife: args.shelfLife } : {}),
+			...(args.registrationNumber !== undefined
+				? { registrationNumber: args.registrationNumber }
+				: {}),
+			...(args.registrationExpiryDate !== undefined
+				? { registrationExpiryDate: args.registrationExpiryDate }
+				: {}),
+			...(args.manufacturer !== undefined
+				? { manufacturer: args.manufacturer }
+				: {}),
+			...(args.countryOfOrigin !== undefined
+				? { countryOfOrigin: args.countryOfOrigin }
+				: {}),
+			...(args.description !== undefined
+				? { description: args.description }
+				: {}),
 			unit: args.unit,
+			...(args.declarationDate !== undefined
+				? { declarationDate: args.declarationDate }
+				: {}),
+			...(args.declarationUnit !== undefined
+				? { declarationUnit: args.declarationUnit }
+				: {}),
+			...(args.declarationDecisionNumber !== undefined
+				? { declarationDecisionNumber: args.declarationDecisionNumber }
+				: {}),
+			...(args.declarationValidity !== undefined
+				? { declarationValidity: args.declarationValidity }
+				: {}),
+			...(args.biddingUnit !== undefined
+				? { biddingUnit: args.biddingUnit }
+				: {}),
+			...(args.indication !== undefined ? { indication: args.indication } : {}),
+			...(args.prescriptionType !== undefined
+				? { prescriptionType: args.prescriptionType }
+				: {}),
+			...(args.vatRate !== undefined ? { vatRate: args.vatRate } : {}),
 			purchasePrice: args.purchasePrice,
 			salePrice: args.salePrice,
 			minStock: args.minStock,
-			isActive: true,
+			isActive: args.isActive ?? true,
 			createdAt: now,
 			updatedAt: now,
 		});
@@ -89,8 +179,41 @@ export const update = mutation({
 		name: v.optional(v.string()),
 		sku: v.optional(v.string()),
 		categoryId: v.optional(v.id("categories")),
+		productType: v.optional(
+			v.union(
+				v.literal("thuoc"),
+				v.literal("vtyt"),
+				v.literal("tpcn"),
+				v.literal("khac"),
+			),
+		),
+		activeIngredient: v.optional(v.string()),
+		strength: v.optional(v.string()),
+		administrationRoute: v.optional(v.string()),
+		dosageForm: v.optional(v.string()),
+		packagingSpecification: v.optional(v.string()),
+		drugGroup: v.optional(v.string()),
+		shelfLife: v.optional(v.string()),
+		registrationNumber: v.optional(v.string()),
+		registrationExpiryDate: v.optional(v.number()),
+		manufacturer: v.optional(v.string()),
+		countryOfOrigin: v.optional(v.string()),
 		description: v.optional(v.string()),
 		unit: v.optional(v.string()),
+		declarationDate: v.optional(v.number()),
+		declarationUnit: v.optional(v.string()),
+		declarationDecisionNumber: v.optional(v.string()),
+		declarationValidity: v.optional(v.string()),
+		biddingUnit: v.optional(v.string()),
+		indication: v.optional(v.string()),
+		prescriptionType: v.optional(
+			v.union(
+				v.literal("prescription"),
+				v.literal("non_prescription"),
+				v.literal("other"),
+			),
+		),
+		vatRate: v.optional(v.number()),
 		purchasePrice: v.optional(v.number()),
 		salePrice: v.optional(v.number()),
 		minStock: v.optional(v.number()),
@@ -103,9 +226,10 @@ export const update = mutation({
 
 		// If SKU is being updated, check for duplicates
 		if (args.sku && args.sku !== existing.sku) {
+			const nextSku = args.sku;
 			const duplicate = await ctx.db
 				.query("products")
-				.withIndex("by_sku", (q) => q.eq("sku", args.sku!))
+				.withIndex("by_sku", (q) => q.eq("sku", nextSku))
 				.first();
 
 			if (duplicate) {
@@ -113,10 +237,13 @@ export const update = mutation({
 			}
 		}
 
-		await ctx.db.patch(id, {
-			...rest,
-			updatedAt: Date.now(),
-		});
+		await ctx.db.patch(
+			id,
+			pickDefined({
+				...rest,
+				updatedAt: Date.now(),
+			}),
+		);
 		return await ctx.db.get(id);
 	},
 });

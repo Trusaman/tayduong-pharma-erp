@@ -1,9 +1,149 @@
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
 import {
 	allocateDiscountBreakdown,
 	getMatchingRuleDiscounts,
 } from "./discountCalculationUtils";
+
+async function prepareSalesOrderItems(
+	ctx: MutationCtx,
+	args: {
+		customerId: Id<"customers">;
+		items: Array<{
+			productId: Id<"products">;
+			quantity: number;
+			unitPrice: number;
+			manualDiscountPercent?: number;
+		}>;
+	},
+) {
+	const discountRules = await ctx.db
+		.query("discountRules")
+		.withIndex("by_active", (q) => q.eq("isActive", true))
+		.collect();
+
+	const salesmen = await ctx.db.query("salesmen").collect();
+	const salesmanNameById = new Map(
+		salesmen.map((salesman) => [salesman._id, salesman.name]),
+	);
+
+	return args.items.map((item) => {
+		const matched = getMatchingRuleDiscounts(
+			discountRules,
+			args.customerId,
+			item.productId,
+		);
+
+		const autoDiscountPercent = Math.min(
+			100,
+			matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
+		);
+		const discountPercent =
+			item.manualDiscountPercent !== undefined
+				? Math.min(100, Math.max(0, item.manualDiscountPercent))
+				: autoDiscountPercent;
+
+		const baseUnitPrice = item.unitPrice;
+		const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
+		const discountAmount = item.quantity * (baseUnitPrice - discountedUnitPrice);
+		const appliedDiscountBreakdown = allocateDiscountBreakdown(
+			matched,
+			discountPercent,
+			discountAmount,
+		).map((entry) => ({
+			...entry,
+			salesmanName: salesmanNameById.get(entry.salesmanId),
+		}));
+
+		return {
+			...item,
+			baseUnitPrice,
+			unitPrice: discountedUnitPrice,
+			discountPercent,
+			discountAmount,
+			appliedDiscountTypes: matched.map((rule) => rule.discountType),
+			appliedDiscountBreakdown,
+		};
+	});
+}
+
+function assertValidSalesOrderItems(
+	items: Array<{
+		quantity: number;
+		unitPrice: number;
+	}>,
+) {
+	if (items.length === 0) {
+		throw new Error("Đơn hàng phải có ít nhất một sản phẩm");
+	}
+
+	for (const item of items) {
+		if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+			throw new Error("Số lượng sản phẩm phải lớn hơn 0");
+		}
+
+		if (!Number.isFinite(item.unitPrice) || item.unitPrice < 0) {
+			throw new Error("Đơn giá sản phẩm không hợp lệ");
+		}
+	}
+}
+
+function formatSalesOrderText(value: string | undefined) {
+	return value?.trim() ? value.trim() : undefined;
+}
+
+function formatSalesOrderItemsSummary(
+	items: Array<{
+		productLabel: string;
+		quantity: number;
+		unitPrice: number;
+		discountPercent?: number;
+	}>,
+) {
+	return items
+		.map((item) => {
+			const discountLabel =
+				item.discountPercent !== undefined ? ` | CK ${item.discountPercent}%` : "";
+			return `${item.productLabel} | SL ${item.quantity} | Gia ${item.unitPrice}${discountLabel}`;
+		})
+		.join("\n");
+}
+
+function areSalesOrderItemsEquivalent(
+	existingItems: Array<{
+		productId: Id<"products">;
+		quantity: number;
+		baseUnitPrice?: number;
+		unitPrice: number;
+		discountPercent?: number;
+	}>,
+	nextItems: Array<{
+		productId: Id<"products">;
+		quantity: number;
+		unitPrice: number;
+		manualDiscountPercent?: number;
+	}>,
+) {
+	if (existingItems.length !== nextItems.length) {
+		return false;
+	}
+
+	const normalizeExisting = existingItems
+		.map(
+			(item) =>
+				`${item.productId}|${item.quantity}|${item.baseUnitPrice ?? item.unitPrice}|${item.discountPercent ?? 0}`,
+		)
+		.sort();
+	const normalizeNext = nextItems
+		.map(
+			(item) =>
+				`${item.productId}|${item.quantity}|${item.unitPrice}|${item.manualDiscountPercent ?? 0}`,
+		)
+		.sort();
+
+	return normalizeExisting.every((item, index) => item === normalizeNext[index]);
+}
 
 // Generate order number
 async function generateOrderNumber(ctx: MutationCtx): Promise<string> {
@@ -149,56 +289,9 @@ export const create = mutation({
 	handler: async (ctx, args) => {
 		const now = Date.now();
 		const orderNumber = await generateOrderNumber(ctx);
+		assertValidSalesOrderItems(args.items);
 
-		const discountRules = await ctx.db
-			.query("discountRules")
-			.withIndex("by_active", (q) => q.eq("isActive", true))
-			.collect();
-
-		const salesmen = await ctx.db.query("salesmen").collect();
-		const salesmanNameById = new Map(
-			salesmen.map((salesman) => [salesman._id, salesman.name]),
-		);
-
-		const preparedItems = args.items.map((item) => {
-			const matched = getMatchingRuleDiscounts(
-				discountRules,
-				args.customerId,
-				item.productId,
-			);
-
-			const autoDiscountPercent = Math.min(
-				100,
-				matched.reduce((sum, rule) => sum + rule.discountPercent, 0),
-			);
-			const discountPercent =
-				item.manualDiscountPercent !== undefined
-					? Math.min(100, Math.max(0, item.manualDiscountPercent))
-					: autoDiscountPercent;
-
-			const baseUnitPrice = item.unitPrice;
-			const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
-			const discountAmount =
-				item.quantity * (baseUnitPrice - discountedUnitPrice);
-			const appliedDiscountBreakdown = allocateDiscountBreakdown(
-				matched,
-				discountPercent,
-				discountAmount,
-			).map((entry) => ({
-				...entry,
-				salesmanName: salesmanNameById.get(entry.salesmanId),
-			}));
-
-			return {
-				...item,
-				baseUnitPrice,
-				unitPrice: discountedUnitPrice,
-				discountPercent,
-				discountAmount,
-				appliedDiscountTypes: matched.map((rule) => rule.discountType),
-				appliedDiscountBreakdown,
-			};
-		});
+		const preparedItems = await prepareSalesOrderItems(ctx, args);
 
 		const totalAmount = preparedItems.reduce(
 			(sum, item) => sum + item.quantity * item.unitPrice,
@@ -240,6 +333,189 @@ export const create = mutation({
 		}
 
 		return await ctx.db.get(orderId);
+	},
+});
+
+export const update = mutation({
+	args: {
+		id: v.id("salesOrders"),
+		customerId: v.id("customers"),
+		salesmanId: v.optional(v.id("salesmen")),
+		items: v.array(
+			v.object({
+				productId: v.id("products"),
+				quantity: v.number(),
+				unitPrice: v.number(),
+				manualDiscountPercent: v.optional(v.number()),
+			}),
+		),
+		notes: v.optional(v.string()),
+		updatedByName: v.string(),
+	},
+	handler: async (ctx, args) => {
+		const order = await ctx.db.get(args.id);
+		if (!order) {
+			throw new Error("Không tìm thấy đơn hàng");
+		}
+
+		const editorName = args.updatedByName.trim();
+		if (!editorName) {
+			throw new Error("Vui lòng nhập tên người sửa đơn");
+		}
+
+		const existingItems = await ctx.db
+			.query("salesOrderItems")
+			.withIndex("by_salesOrder", (q) => q.eq("salesOrderId", args.id))
+			.collect();
+
+		assertValidSalesOrderItems(args.items);
+		const hasFulfilledItems = existingItems.some(
+			(item) => item.fulfilledQuantity > 0,
+		);
+		const now = Date.now();
+		const nextNotes = formatSalesOrderText(args.notes);
+		const existingNotes = formatSalesOrderText(order.notes);
+
+		const customers = await ctx.db.query("customers").collect();
+		const salesmen = await ctx.db.query("salesmen").collect();
+		const products = await ctx.db.query("products").collect();
+
+		const customerNameById = new Map(customers.map((item) => [item._id, item.name]));
+		const salesmanNameById = new Map(salesmen.map((item) => [item._id, item.name]));
+		const productNameById = new Map(products.map((item) => [item._id, item.name]));
+
+		const changes: Array<{
+			field: string;
+			from?: string;
+			to?: string;
+		}> = [];
+
+		const pushChange = (field: string, from?: string, to?: string) => {
+			if ((from ?? undefined) === (to ?? undefined)) {
+				return;
+			}
+			changes.push({ field, from, to });
+		};
+
+		pushChange("notes", existingNotes, nextNotes);
+
+		if (hasFulfilledItems) {
+			const isSameHeader =
+				order.customerId === args.customerId &&
+				order.salesmanId === args.salesmanId;
+			const isSameItems = areSalesOrderItemsEquivalent(existingItems, args.items);
+
+			if (!isSameHeader || !isSameItems) {
+				throw new Error(
+					"Đơn đã có giao hàng, chỉ có thể sửa ghi chú để tránh lệch tồn kho và dữ liệu đối soát",
+				);
+			}
+
+			if (changes.length === 0) {
+				return order;
+			}
+
+			await ctx.db.patch(args.id, {
+				notes: nextNotes,
+				updatedAt: now,
+				editHistory: [
+					...(order.editHistory ?? []),
+					{
+						editedAt: now,
+						editedBy: editorName,
+						changes,
+					},
+				],
+			});
+
+			return await ctx.db.get(args.id);
+		}
+
+		pushChange(
+			"customer",
+			customerNameById.get(order.customerId),
+			customerNameById.get(args.customerId),
+		);
+		pushChange(
+			"salesman",
+			order.salesmanId ? salesmanNameById.get(order.salesmanId) : undefined,
+			args.salesmanId ? salesmanNameById.get(args.salesmanId) : undefined,
+		);
+
+		const preparedItems = await prepareSalesOrderItems(ctx, args);
+		const existingItemsSummary = formatSalesOrderItemsSummary(
+			existingItems.map((item) => ({
+				productLabel: productNameById.get(item.productId) ?? item.productId,
+				quantity: item.quantity,
+				unitPrice: item.baseUnitPrice ?? item.unitPrice,
+				discountPercent: item.discountPercent,
+			})),
+		);
+		const nextItemsSummary = formatSalesOrderItemsSummary(
+			preparedItems.map((item) => ({
+				productLabel: productNameById.get(item.productId) ?? item.productId,
+				quantity: item.quantity,
+				unitPrice: item.baseUnitPrice,
+				discountPercent: item.discountPercent,
+			})),
+		);
+		pushChange("items", existingItemsSummary, nextItemsSummary);
+
+		if (changes.length === 0) {
+			return order;
+		}
+
+		const totalAmount = preparedItems.reduce(
+			(sum, item) => sum + item.quantity * item.unitPrice,
+			0,
+		);
+		const totalDiscountAmount = preparedItems.reduce(
+			(sum, item) => sum + item.discountAmount,
+			0,
+		);
+		const nextEditHistory =
+			changes.length > 0
+				? [
+					...(order.editHistory ?? []),
+					{
+						editedAt: now,
+						editedBy: editorName,
+						changes,
+					},
+				]
+				: order.editHistory;
+
+		await ctx.db.patch(args.id, {
+			customerId: args.customerId,
+			salesmanId: args.salesmanId,
+			totalAmount,
+			totalDiscountAmount,
+			notes: nextNotes,
+			editHistory: nextEditHistory,
+			updatedAt: now,
+		});
+
+		for (const existingItem of existingItems) {
+			await ctx.db.delete(existingItem._id);
+		}
+
+		for (const item of preparedItems) {
+			await ctx.db.insert("salesOrderItems", {
+				salesOrderId: args.id,
+				productId: item.productId,
+				quantity: item.quantity,
+				baseUnitPrice: item.baseUnitPrice,
+				unitPrice: item.unitPrice,
+				discountPercent: item.discountPercent,
+				discountAmount: item.discountAmount,
+				appliedDiscountTypes: item.appliedDiscountTypes,
+				appliedDiscountBreakdown: item.appliedDiscountBreakdown,
+				fulfilledQuantity: 0,
+				createdAt: now,
+			});
+		}
+
+		return await ctx.db.get(args.id);
 	},
 });
 

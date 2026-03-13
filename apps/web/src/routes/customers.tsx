@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
+import type { Doc, Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Pencil, Plus, Search, Trash2, UserCircle } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,13 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import {
 	Table,
 	TableBody,
@@ -35,32 +42,159 @@ export const Route = createFileRoute("/customers")({
 interface CustomerForm {
 	name: string;
 	code: string;
+	taxId: string;
+	address: string;
+	province: string;
+	billingAddress: string;
+	shippingAddress: string;
+	companyDirector: string;
+	paymentResponsibleName: string;
+	orderResponsibleName: string;
+	employeeCode: string;
+	territory: string;
+	biddingContactName: string;
+	biddingContactPhone: string;
+	biddingContactNotes: string;
+	paymentContactName: string;
+	paymentContactPhone: string;
+	paymentContactNotes: string;
+	receivingContactName: string;
+	receivingContactPhone: string;
+	receivingContactNotes: string;
+	otherContactName: string;
+	otherContactPhone: string;
+	otherContactNotes: string;
 	contactPerson: string;
 	email: string;
 	phone: string;
-	address: string;
-	taxId: string;
 	notes: string;
+	isActive: boolean;
 }
+
+type StringFieldKey = {
+	[K in keyof CustomerForm]: CustomerForm[K] extends string ? K : never;
+}[keyof CustomerForm];
 
 const initialForm: CustomerForm = {
 	name: "",
 	code: "",
+	taxId: "",
+	address: "",
+	province: "",
+	billingAddress: "",
+	shippingAddress: "",
+	companyDirector: "",
+	paymentResponsibleName: "",
+	orderResponsibleName: "",
+	employeeCode: "",
+	territory: "",
+	biddingContactName: "",
+	biddingContactPhone: "",
+	biddingContactNotes: "",
+	paymentContactName: "",
+	paymentContactPhone: "",
+	paymentContactNotes: "",
+	receivingContactName: "",
+	receivingContactPhone: "",
+	receivingContactNotes: "",
+	otherContactName: "",
+	otherContactPhone: "",
+	otherContactNotes: "",
 	contactPerson: "",
 	email: "",
 	phone: "",
-	address: "",
-	taxId: "",
 	notes: "",
+	isActive: true,
 };
+
+function formatOptionalString(value: string) {
+	const trimmed = value.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function getPrimaryContactNameFromValues(values: {
+	orderResponsibleName?: string;
+	paymentResponsibleName?: string;
+	biddingContactName?: string;
+	paymentContactName?: string;
+	receivingContactName?: string;
+	otherContactName?: string;
+	contactPerson?: string;
+}) {
+	return (
+		values.orderResponsibleName ??
+		values.paymentResponsibleName ??
+		values.biddingContactName ??
+		values.paymentContactName ??
+		values.receivingContactName ??
+		values.otherContactName ??
+		values.contactPerson ??
+		"-"
+	);
+}
+
+function getPrimaryPhoneFromValues(values: {
+	biddingContactPhone?: string;
+	paymentContactPhone?: string;
+	receivingContactPhone?: string;
+	otherContactPhone?: string;
+	phone?: string;
+}) {
+	return (
+		values.biddingContactPhone ??
+		values.paymentContactPhone ??
+		values.receivingContactPhone ??
+		values.otherContactPhone ??
+		values.phone ??
+		"-"
+	);
+}
+
+function getPrimaryContactName(customer: Doc<"customers">) {
+	return getPrimaryContactNameFromValues(customer);
+}
+
+function getPrimaryPhone(customer: Doc<"customers">) {
+	return getPrimaryPhoneFromValues(customer);
+}
+
+function getTerritoryLabel(customer: Doc<"customers">) {
+	return customer.territory ?? customer.province ?? "-";
+}
+
+function FormSection({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<section className="overflow-hidden rounded-lg border bg-background">
+			<div className="border-b bg-muted/40 px-4 py-3 font-semibold text-sm">
+				{title}
+			</div>
+			<div>{children}</div>
+		</section>
+	);
+}
+
+function FormRow({
+	label,
+	children,
+}: {
+	label: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className="grid items-start gap-3 border-b px-4 py-3 last:border-b-0 md:grid-cols-[220px_minmax(0,1fr)]">
+			<div className="pt-2 font-medium text-sm">{label}</div>
+			<div>{children}</div>
+		</div>
+	);
+}
 
 function CustomersPage() {
 	const [search, setSearch] = useState("");
 	const [dialogOpen, setDialogOpen] = useState(false);
-	const [editingId, setEditingId] = useState<string | null>(null);
+	const [editingId, setEditingId] = useState<Id<"customers"> | null>(null);
 	const [form, setForm] = useState<CustomerForm>(initialForm);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-	const [deletingId, setDeletingId] = useState<string | null>(null);
+	const [deletingId, setDeletingId] = useState<Id<"customers"> | null>(null);
 
 	const customers = useQuery(api.customers.list, { activeOnly: false });
 
@@ -69,74 +203,190 @@ function CustomersPage() {
 	const deleteCustomer = useMutation(api.customers.remove);
 
 	const filteredCustomers = customers?.filter(
-		(c) =>
-			c.name.toLowerCase().includes(search.toLowerCase()) ||
-			c.code.toLowerCase().includes(search.toLowerCase()),
+		(customer) =>
+			customer.name.toLowerCase().includes(search.toLowerCase()) ||
+			customer.code.toLowerCase().includes(search.toLowerCase()),
 	);
+
+	const updateField = <K extends keyof CustomerForm>(
+		field: K,
+		value: CustomerForm[K],
+	) => {
+		setForm((current) => ({ ...current, [field]: value }));
+	};
+
+	const buildPayload = () => {
+		const primaryContact = formatOptionalString(
+			getPrimaryContactNameFromValues({
+				orderResponsibleName: formatOptionalString(form.orderResponsibleName),
+				paymentResponsibleName: formatOptionalString(form.paymentResponsibleName),
+				biddingContactName: formatOptionalString(form.biddingContactName),
+				paymentContactName: formatOptionalString(form.paymentContactName),
+				receivingContactName: formatOptionalString(form.receivingContactName),
+				otherContactName: formatOptionalString(form.otherContactName),
+				contactPerson: formatOptionalString(form.contactPerson),
+			}),
+		);
+		const primaryPhone = formatOptionalString(
+			getPrimaryPhoneFromValues({
+				biddingContactPhone: formatOptionalString(form.biddingContactPhone),
+				paymentContactPhone: formatOptionalString(form.paymentContactPhone),
+				receivingContactPhone: formatOptionalString(form.receivingContactPhone),
+				otherContactPhone: formatOptionalString(form.otherContactPhone),
+				phone: formatOptionalString(form.phone),
+			}),
+		);
+
+		return {
+			name: form.name.trim(),
+			code: form.code.trim(),
+			contactPerson: primaryContact,
+			email: formatOptionalString(form.email),
+			phone: primaryPhone,
+			address: formatOptionalString(form.address),
+			taxId: formatOptionalString(form.taxId),
+			province: formatOptionalString(form.province),
+			billingAddress: formatOptionalString(form.billingAddress),
+			shippingAddress: formatOptionalString(form.shippingAddress),
+			companyDirector: formatOptionalString(form.companyDirector),
+			paymentResponsibleName: formatOptionalString(form.paymentResponsibleName),
+			orderResponsibleName: formatOptionalString(form.orderResponsibleName),
+			employeeCode: formatOptionalString(form.employeeCode),
+			territory: formatOptionalString(form.territory),
+			biddingContactName: formatOptionalString(form.biddingContactName),
+			biddingContactPhone: formatOptionalString(form.biddingContactPhone),
+			biddingContactNotes: formatOptionalString(form.biddingContactNotes),
+			paymentContactName: formatOptionalString(form.paymentContactName),
+			paymentContactPhone: formatOptionalString(form.paymentContactPhone),
+			paymentContactNotes: formatOptionalString(form.paymentContactNotes),
+			receivingContactName: formatOptionalString(form.receivingContactName),
+			receivingContactPhone: formatOptionalString(form.receivingContactPhone),
+			receivingContactNotes: formatOptionalString(form.receivingContactNotes),
+			otherContactName: formatOptionalString(form.otherContactName),
+			otherContactPhone: formatOptionalString(form.otherContactPhone),
+			otherContactNotes: formatOptionalString(form.otherContactNotes),
+			notes: formatOptionalString(form.notes),
+			isActive: form.isActive,
+		};
+	};
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+
+		if (!form.name.trim() || !form.code.trim()) {
+			toast.error("Vui lòng nhập mã khách hàng và tên khách hàng");
+			return;
+		}
+
 		try {
+			const payload = buildPayload();
+
 			if (editingId) {
 				await updateCustomer({
-					id: editingId as any,
-					name: form.name,
-					code: form.code,
-					contactPerson: form.contactPerson || undefined,
-					email: form.email || undefined,
-					phone: form.phone || undefined,
-					address: form.address || undefined,
-					taxId: form.taxId || undefined,
-					notes: form.notes || undefined,
+					id: editingId,
+					...payload,
 				});
 				toast.success("Đã cập nhật khách hàng thành công");
 			} else {
-				await createCustomer({
-					name: form.name,
-					code: form.code,
-					contactPerson: form.contactPerson || undefined,
-					email: form.email || undefined,
-					phone: form.phone || undefined,
-					address: form.address || undefined,
-					taxId: form.taxId || undefined,
-					notes: form.notes || undefined,
-				});
+				await createCustomer(payload);
 				toast.success("Đã tạo khách hàng thành công");
 			}
+
 			setDialogOpen(false);
 			setForm(initialForm);
 			setEditingId(null);
-		} catch (error: any) {
-			toast.error(error.message || "Không thể lưu khách hàng");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể lưu khách hàng",
+			);
 		}
 	};
 
-	const handleEdit = (customer: any) => {
+	const handleEdit = (customer: Doc<"customers">) => {
 		setEditingId(customer._id);
 		setForm({
 			name: customer.name,
 			code: customer.code,
-			contactPerson: customer.contactPerson || "",
-			email: customer.email || "",
-			phone: customer.phone || "",
-			address: customer.address || "",
-			taxId: customer.taxId || "",
-			notes: customer.notes || "",
+			taxId: customer.taxId ?? "",
+			address: customer.address ?? "",
+			province: customer.province ?? "",
+			billingAddress: customer.billingAddress ?? "",
+			shippingAddress: customer.shippingAddress ?? "",
+			companyDirector: customer.companyDirector ?? "",
+			paymentResponsibleName: customer.paymentResponsibleName ?? "",
+			orderResponsibleName:
+				customer.orderResponsibleName ?? customer.contactPerson ?? "",
+			employeeCode: customer.employeeCode ?? "",
+			territory: customer.territory ?? "",
+			biddingContactName: customer.biddingContactName ?? "",
+			biddingContactPhone: customer.biddingContactPhone ?? customer.phone ?? "",
+			biddingContactNotes: customer.biddingContactNotes ?? "",
+			paymentContactName: customer.paymentContactName ?? "",
+			paymentContactPhone: customer.paymentContactPhone ?? "",
+			paymentContactNotes: customer.paymentContactNotes ?? "",
+			receivingContactName: customer.receivingContactName ?? "",
+			receivingContactPhone: customer.receivingContactPhone ?? "",
+			receivingContactNotes: customer.receivingContactNotes ?? "",
+			otherContactName: customer.otherContactName ?? "",
+			otherContactPhone: customer.otherContactPhone ?? "",
+			otherContactNotes: customer.otherContactNotes ?? "",
+			contactPerson: customer.contactPerson ?? "",
+			email: customer.email ?? "",
+			phone: customer.phone ?? "",
+			notes: customer.notes ?? "",
+			isActive: customer.isActive,
 		});
 		setDialogOpen(true);
 	};
 
 	const handleDelete = async () => {
-		if (!deletingId) return;
+		if (!deletingId) {
+			return;
+		}
+
 		try {
-			await deleteCustomer({ id: deletingId as any });
+			await deleteCustomer({ id: deletingId });
 			toast.success("Đã xóa khách hàng thành công");
 			setDeleteDialogOpen(false);
 			setDeletingId(null);
-		} catch (error: any) {
-			toast.error(error.message || "Không thể xóa khách hàng");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể xóa khách hàng",
+			);
 		}
 	};
+
+	const renderContactSection = (
+		title: string,
+		nameField: StringFieldKey,
+		phoneField: StringFieldKey,
+		notesField: StringFieldKey,
+	) => (
+		<FormSection title={title}>
+			<FormRow label="Người phụ trách">
+				<Input
+					value={form[nameField]}
+					onChange={(e) => updateField(nameField, e.target.value)}
+					placeholder="Nhập tên người phụ trách"
+				/>
+			</FormRow>
+			<FormRow label="Số điện thoại">
+				<Input
+					value={form[phoneField]}
+					onChange={(e) => updateField(phoneField, e.target.value)}
+					placeholder="Nhập số điện thoại"
+				/>
+			</FormRow>
+			<FormRow label="Ghi chú">
+				<Textarea
+					value={form[notesField]}
+					onChange={(e) => updateField(notesField, e.target.value)}
+					placeholder="Ghi chú thêm"
+					rows={3}
+				/>
+			</FormRow>
+		</FormSection>
+	);
 
 	return (
 		<div className="space-y-6">
@@ -157,106 +407,167 @@ function CustomersPage() {
 							Thêm khách hàng
 						</Button>
 					</DialogTrigger>
-					<DialogContent className="sm:max-w-[500px]">
+					<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[920px]">
 						<form onSubmit={handleSubmit}>
 							<DialogHeader>
 								<DialogTitle>
 									{editingId ? "Sửa khách hàng" : "Thêm khách hàng"}
 								</DialogTitle>
 								<DialogDescription>
-									Nhập thông tin khách hàng bên dưới.
+									Biểu mẫu khách hàng chi tiết theo nhóm thông tin.
 								</DialogDescription>
 							</DialogHeader>
-							<div className="grid gap-4 py-4">
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<Label htmlFor="name">Tên *</Label>
+							<div className="space-y-5 py-4">
+								<FormSection title="Thông tin chung">
+									<FormRow label="Mã khách hàng *">
 										<Input
-											id="name"
-											value={form.name}
-											onChange={(e) =>
-												setForm({ ...form, name: e.target.value })
-											}
-											required
-										/>
-									</div>
-									<div className="space-y-2">
-										<Label htmlFor="code">Mã *</Label>
-										<Input
-											id="code"
 											value={form.code}
-											onChange={(e) =>
-												setForm({ ...form, code: e.target.value })
-											}
+											onChange={(e) => updateField("code", e.target.value)}
+											placeholder="Nhập mã khách hàng"
 											required
 										/>
-									</div>
-								</div>
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<Label htmlFor="contactPerson">Người liên hệ</Label>
+									</FormRow>
+									<FormRow label="Tên khách hàng *">
 										<Input
-											id="contactPerson"
-											value={form.contactPerson}
-											onChange={(e) =>
-												setForm({ ...form, contactPerson: e.target.value })
-											}
+											value={form.name}
+											onChange={(e) => updateField("name", e.target.value)}
+											placeholder="Nhập tên khách hàng"
+											required
 										/>
-									</div>
-									<div className="space-y-2">
-										<Label htmlFor="phone">Điện thoại</Label>
+									</FormRow>
+									<FormRow label="Mã số thuế">
 										<Input
-											id="phone"
-											value={form.phone}
-											onChange={(e) =>
-												setForm({ ...form, phone: e.target.value })
-											}
-										/>
-									</div>
-								</div>
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<Label htmlFor="email">Email</Label>
-										<Input
-											id="email"
-											type="email"
-											value={form.email}
-											onChange={(e) =>
-												setForm({ ...form, email: e.target.value })
-											}
-										/>
-									</div>
-									<div className="space-y-2">
-										<Label htmlFor="taxId">Mã số thuế</Label>
-										<Input
-											id="taxId"
 											value={form.taxId}
-											onChange={(e) =>
-												setForm({ ...form, taxId: e.target.value })
-											}
+											onChange={(e) => updateField("taxId", e.target.value)}
+											placeholder="Nhập mã số thuế"
 										/>
-									</div>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="address">Địa chỉ</Label>
-									<Input
-										id="address"
-										value={form.address}
-										onChange={(e) =>
-											setForm({ ...form, address: e.target.value })
-										}
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="notes">Ghi chú</Label>
-									<Textarea
-										id="notes"
-										value={form.notes}
-										onChange={(e) =>
-											setForm({ ...form, notes: e.target.value })
-										}
-									/>
-								</div>
+									</FormRow>
+									<FormRow label="Địa chỉ">
+										<Textarea
+											value={form.address}
+											onChange={(e) => updateField("address", e.target.value)}
+											placeholder="Nhập địa chỉ chính"
+											rows={2}
+										/>
+									</FormRow>
+									<FormRow label="Tỉnh">
+										<Input
+											value={form.province}
+											onChange={(e) => updateField("province", e.target.value)}
+											placeholder="Ví dụ: Hà Nội"
+										/>
+									</FormRow>
+									<FormRow label="Địa chỉ hóa đơn">
+										<Textarea
+											value={form.billingAddress}
+											onChange={(e) =>
+												updateField("billingAddress", e.target.value)
+											}
+											placeholder="Nhập địa chỉ hóa đơn"
+											rows={2}
+										/>
+									</FormRow>
+									<FormRow label="Địa chỉ giao hàng">
+										<Textarea
+											value={form.shippingAddress}
+											onChange={(e) =>
+												updateField("shippingAddress", e.target.value)
+											}
+											placeholder="Nhập địa chỉ giao hàng"
+											rows={2}
+										/>
+									</FormRow>
+									<FormRow label="Giám đốc công ty">
+										<Input
+											value={form.companyDirector}
+											onChange={(e) =>
+												updateField("companyDirector", e.target.value)
+											}
+											placeholder="Nhập tên giám đốc"
+										/>
+									</FormRow>
+									<FormRow label="Người phụ trách thanh toán">
+										<Input
+											value={form.paymentResponsibleName}
+											onChange={(e) =>
+												updateField("paymentResponsibleName", e.target.value)
+											}
+											placeholder="Nhập người phụ trách thanh toán"
+										/>
+									</FormRow>
+									<FormRow label="Người phụ trách nhận đơn">
+										<Input
+											value={form.orderResponsibleName}
+											onChange={(e) =>
+												updateField("orderResponsibleName", e.target.value)
+											}
+											placeholder="Nhập người phụ trách nhận đơn"
+										/>
+									</FormRow>
+									<FormRow label="Nhân viên phụ trách (Mã nhân viên)">
+										<Input
+											value={form.employeeCode}
+											onChange={(e) => updateField("employeeCode", e.target.value)}
+											placeholder="Nhập mã nhân viên"
+										/>
+									</FormRow>
+									<FormRow label="Địa bàn">
+										<Input
+											value={form.territory}
+											onChange={(e) => updateField("territory", e.target.value)}
+											placeholder="Ví dụ: Tỉnh, Hà Nội"
+										/>
+									</FormRow>
+								</FormSection>
+
+								{renderContactSection(
+									"Thông tin người phụ trách thầu",
+									"biddingContactName",
+									"biddingContactPhone",
+									"biddingContactNotes",
+								)}
+
+								{renderContactSection(
+									"Thông tin người phụ trách thanh toán",
+									"paymentContactName",
+									"paymentContactPhone",
+									"paymentContactNotes",
+								)}
+
+								{renderContactSection(
+									"Thông tin người phụ trách nhận hàng",
+									"receivingContactName",
+									"receivingContactPhone",
+									"receivingContactNotes",
+								)}
+
+								{renderContactSection(
+									"Thông tin người phụ trách khác",
+									"otherContactName",
+									"otherContactPhone",
+									"otherContactNotes",
+								)}
+
+								<FormSection title="Trạng thái">
+									<FormRow label="Trạng thái">
+										<Select
+											value={form.isActive ? "active" : "inactive"}
+											onValueChange={(value) =>
+												updateField("isActive", value === "active")
+											}
+										>
+											<SelectTrigger>
+												<SelectValue placeholder="Chọn trạng thái" />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="active">Hoạt động</SelectItem>
+												<SelectItem value="inactive">
+													Không hoạt động
+												</SelectItem>
+											</SelectContent>
+										</Select>
+									</FormRow>
+								</FormSection>
 							</div>
 							<DialogFooter>
 								<Button type="submit">{editingId ? "Cập nhật" : "Tạo"}</Button>
@@ -296,10 +607,10 @@ function CustomersPage() {
 							<TableHeader>
 								<TableRow>
 									<TableHead>Mã</TableHead>
-									<TableHead>Tên</TableHead>
-									<TableHead>Người liên hệ</TableHead>
+									<TableHead>Tên khách hàng</TableHead>
+									<TableHead>Người phụ trách</TableHead>
 									<TableHead>Điện thoại</TableHead>
-									<TableHead>Email</TableHead>
+									<TableHead>Địa bàn</TableHead>
 									<TableHead className="text-center">Trạng thái</TableHead>
 									<TableHead className="text-right">Thao tác</TableHead>
 								</TableRow>
@@ -308,17 +619,15 @@ function CustomersPage() {
 								{filteredCustomers?.map((customer) => (
 									<TableRow key={customer._id}>
 										<TableCell className="font-mono">{customer.code}</TableCell>
-										<TableCell className="font-medium">
-											{customer.name}
-										</TableCell>
-										<TableCell>{customer.contactPerson || "-"}</TableCell>
-										<TableCell>{customer.phone || "-"}</TableCell>
-										<TableCell>{customer.email || "-"}</TableCell>
+										<TableCell className="font-medium">{customer.name}</TableCell>
+										<TableCell>{getPrimaryContactName(customer)}</TableCell>
+										<TableCell>{getPrimaryPhone(customer)}</TableCell>
+										<TableCell>{getTerritoryLabel(customer)}</TableCell>
 										<TableCell className="text-center">
 											{customer.isActive ? (
-												<Badge variant="default">Đang hoạt động</Badge>
+												<Badge variant="default">Hoạt động</Badge>
 											) : (
-												<Badge variant="secondary">Ngưng hoạt động</Badge>
+												<Badge variant="secondary">Không hoạt động</Badge>
 											)}
 										</TableCell>
 										<TableCell className="text-right">
@@ -353,15 +662,11 @@ function CustomersPage() {
 					<DialogHeader>
 						<DialogTitle>Xóa khách hàng</DialogTitle>
 						<DialogDescription>
-							Bạn có chắc muốn xóa khách hàng này? Hành động này không thể hoàn
-							tác.
+							Bạn có chắc muốn xóa khách hàng này? Hành động này không thể hoàn tác.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setDeleteDialogOpen(false)}
-						>
+						<Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
 							Hủy
 						</Button>
 						<Button variant="destructive" onClick={handleDelete}>

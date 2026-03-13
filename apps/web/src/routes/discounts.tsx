@@ -293,7 +293,7 @@ function DiscountsPage() {
 	const [editForm, setEditForm] =
 		useState<EditDiscountFormState>(createEmptyEditForm);
 
-	const salesmen = useQuery(api.salesmen.list, { activeOnly: true });
+	const salesmen = useQuery(api.discountRecipients.list, { activeOnly: false });
 	const customers = useQuery(api.customers.list, { activeOnly: true });
 	const products = useQuery(api.products.list, { activeOnly: true });
 	const rules = useQuery(api.discounts.listWithDetails, { activeOnly: false });
@@ -316,7 +316,7 @@ function DiscountsPage() {
 		rulesByGroup: Partial<Record<DiscountGroupKey, DiscountRuleRow>>;
 	};
 
-	const createSalesman = useMutation(api.salesmen.create);
+	const createSalesman = useMutation(api.discountRecipients.create);
 	const createDiscount = useMutation(api.discounts.create);
 	const updateDiscount = useMutation(api.discounts.update);
 	const removeManyDiscounts = useMutation(api.discounts.removeMany);
@@ -357,6 +357,19 @@ function DiscountsPage() {
 				? editingRule.salesman.name
 				: undefined)
 		);
+	};
+
+	const getSalesmanDisplayLabel = (salesmanId: string) => {
+		if (!salesmanId) return undefined;
+
+		const salesman = salesmen?.find((item) => item._id === salesmanId);
+		if (salesman) {
+			return salesman.isActive === false
+				? `${salesman.name} (ngừng sử dụng)`
+				: salesman.name;
+		}
+
+		return getSalesmanDisplayName(salesmanId);
 	};
 
 	const formatDate = (timestamp: number) =>
@@ -1802,7 +1815,7 @@ function DiscountsPage() {
 														<SelectTrigger>
 															<SelectValue placeholder="Chọn người nhận">
 																{discountForm[group.key].salesmanId
-																	? getSalesmanDisplayName(
+																	? getSalesmanDisplayLabel(
 																			discountForm[group.key].salesmanId,
 																		)
 																	: undefined}
@@ -1814,7 +1827,9 @@ function DiscountsPage() {
 																	key={salesman._id}
 																	value={salesman._id}
 																>
-																	{salesman.name}
+																	{salesman.isActive === false
+																		? `${salesman.name} (ngừng sử dụng)`
+																		: salesman.name}
 																</SelectItem>
 															))}
 														</SelectContent>
@@ -2027,7 +2042,7 @@ function DiscountsPage() {
 												<SelectTrigger>
 													<SelectValue placeholder="Chọn người nhận">
 														{editForm[group.key].salesmanId
-															? getSalesmanDisplayName(
+															? getSalesmanDisplayLabel(
 																	editForm[group.key].salesmanId,
 																)
 															: undefined}
@@ -2036,7 +2051,9 @@ function DiscountsPage() {
 												<SelectContent>
 													{salesmen?.map((salesman) => (
 														<SelectItem key={salesman._id} value={salesman._id}>
-															{salesman.name}
+															{salesman.isActive === false
+																? `${salesman.name} (ngừng sử dụng)`
+																: salesman.name}
 														</SelectItem>
 													))}
 												</SelectContent>

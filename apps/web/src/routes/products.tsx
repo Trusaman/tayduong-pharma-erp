@@ -1,5 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
+import type {
+	Doc,
+	Id,
+} from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import {
 	AlertTriangle,
@@ -70,12 +74,46 @@ const DEFAULT_UNITS = [
 	{ value: "suppository", label: "Đạn" },
 ];
 
+const PRODUCT_TYPE_OPTIONS = [
+	{ value: "thuoc", label: "Thuốc" },
+	{ value: "vtyt", label: "VTYT" },
+	{ value: "tpcn", label: "TPCN" },
+	{ value: "khac", label: "Khác" },
+] as const;
+
+const PRESCRIPTION_TYPE_OPTIONS = [
+	{ value: "prescription", label: "Thuốc kê đơn" },
+	{ value: "non_prescription", label: "Thuốc không kê đơn" },
+	{ value: "other", label: "Khác" },
+] as const;
+
 interface ProductForm {
 	name: string;
 	sku: string;
-	categoryId: string;
+	categoryId: Id<"categories"> | "";
+	productType: (typeof PRODUCT_TYPE_OPTIONS)[number]["value"] | "";
+	activeIngredient: string;
+	strength: string;
+	administrationRoute: string;
+	dosageForm: string;
+	packagingSpecification: string;
+	drugGroup: string;
+	shelfLife: string;
+	registrationNumber: string;
+	registrationExpiryDate: string;
+	manufacturer: string;
+	countryOfOrigin: string;
 	description: string;
 	unit: string;
+	declarationDate: string;
+	declarationUnit: string;
+	declarationDecisionNumber: string;
+	declarationValidity: string;
+	biddingUnit: string;
+	indication: string;
+	prescriptionType: (typeof PRESCRIPTION_TYPE_OPTIONS)[number]["value"] | "";
+	vatRate: string;
+	isActive: "active" | "inactive";
 	purchasePrice: string;
 	salePrice: string;
 	minStock: string;
@@ -85,11 +123,83 @@ const initialForm: ProductForm = {
 	name: "",
 	sku: "",
 	categoryId: "",
+	productType: "thuoc",
+	activeIngredient: "",
+	strength: "",
+	administrationRoute: "",
+	dosageForm: "",
+	packagingSpecification: "",
+	drugGroup: "",
+	shelfLife: "",
+	registrationNumber: "",
+	registrationExpiryDate: "",
+	manufacturer: "",
+	countryOfOrigin: "",
 	description: "",
 	unit: "tablet",
+	declarationDate: "",
+	declarationUnit: "",
+	declarationDecisionNumber: "",
+	declarationValidity: "",
+	biddingUnit: "",
+	indication: "",
+	prescriptionType: "prescription",
+	vatRate: "",
+	isActive: "active",
 	purchasePrice: "",
 	salePrice: "",
 	minStock: "0",
+};
+
+const parseOptionalNumber = (value: string) => {
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	const parsed = Number.parseFloat(trimmed);
+	return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseOptionalDate = (value: string) => {
+	return value ? Date.parse(`${value}T00:00:00.000Z`) : undefined;
+};
+
+const toDateInputValue = (timestamp?: number) => {
+	if (!timestamp) return "";
+	return new Date(timestamp).toISOString().slice(0, 10);
+};
+
+const formatDateTime = (timestamp?: number) => {
+	if (!timestamp) return "Tự động cập nhật";
+	return new Intl.DateTimeFormat("vi-VN", {
+		dateStyle: "short",
+		timeStyle: "short",
+	}).format(timestamp);
+};
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+	return error instanceof Error ? error.message : fallback;
+};
+
+const parseRequiredNumber = (value: string, label: string) => {
+	const parsed = Number.parseFloat(value);
+	if (!Number.isFinite(parsed)) {
+		throw new Error(`Vui lòng nhập ${label.toLowerCase()} hợp lệ`);
+	}
+	return parsed;
+};
+
+const parseMinStock = (value: string) => {
+	const trimmed = value.trim();
+	if (!trimmed) return 0;
+	const parsed = Number.parseInt(trimmed, 10);
+	if (Number.isNaN(parsed) || parsed < 0) {
+		throw new Error("Vui lòng nhập mức tồn kho tối thiểu hợp lệ");
+	}
+	return parsed;
+};
+
+type ProductRow = Doc<"products"> & {
+	totalStock: number;
+	isLowStock: boolean;
 };
 
 function ProductsPage() {
@@ -98,11 +208,16 @@ function ProductsPage() {
 		"all" | "active" | "inactive"
 	>("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
-	const [editingId, setEditingId] = useState<string | null>(null);
+	const [editingId, setEditingId] = useState<Id<"products"> | null>(null);
 	const [form, setForm] = useState<ProductForm>(initialForm);
-	const [deletingId, setDeletingId] = useState<string | null>(null);
+	const [formMeta, setFormMeta] = useState<{
+		createdAt?: number;
+		updatedAt?: number;
+	}>({});
+	const [deletingId, setDeletingId] = useState<Id<"products"> | null>(null);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-	const [toggleConfirmProduct, setToggleConfirmProduct] = useState<any>(null);
+	const [toggleConfirmProduct, setToggleConfirmProduct] =
+		useState<ProductRow | null>(null);
 
 	// Quick add dialogs
 	const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
@@ -137,6 +252,26 @@ function ProductsPage() {
 		return matchesSearch && matchesActive;
 	});
 
+	const updateFormField = <K extends keyof ProductForm>(
+		field: K,
+		value: ProductForm[K],
+	) => {
+		setForm((current) => ({ ...current, [field]: value }));
+	};
+
+	const resetProductDialog = () => {
+		setForm(initialForm);
+		setEditingId(null);
+		setFormMeta({});
+	};
+
+	const handleDialogOpenChange = (open: boolean) => {
+		setDialogOpen(open);
+		if (!open) {
+			resetProductDialog();
+		}
+	};
+
 	const handleQuickAddCategory = async () => {
 		if (!quickCategoryName.trim()) {
 			toast.error("Vui lòng nhập tên danh mục");
@@ -149,9 +284,9 @@ function ProductsPage() {
 			toast.success("Đã tạo danh mục thành công");
 			setQuickCategoryOpen(false);
 			setQuickCategoryName("");
-			setForm({ ...form, categoryId: categoryId as string });
-		} catch (error: any) {
-			toast.error(error.message || "Không thể tạo danh mục");
+			updateFormField("categoryId", categoryId as Id<"categories">);
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể tạo danh mục"));
 		}
 	};
 
@@ -168,62 +303,138 @@ function ProductsPage() {
 		try {
 			await createUnit({ name: newUnitName.trim() });
 			toast.success("Đã thêm đơn vị thành công");
-			setForm({ ...form, unit: unitLower });
+			updateFormField("unit", unitLower);
 			setQuickUnitOpen(false);
 			setNewUnitName("");
-		} catch (error: any) {
-			toast.error(error.message || "Không thể thêm đơn vị");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể thêm đơn vị"));
 		}
 	};
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
+			const purchasePrice = parseRequiredNumber(form.purchasePrice, "giá nhập");
+			const salePrice = parseRequiredNumber(form.salePrice, "giá bán");
+			const minStock = parseMinStock(form.minStock);
 			if (editingId) {
 				await updateProduct({
-					id: editingId as any,
+					id: editingId,
 					name: form.name,
 					sku: form.sku,
-					categoryId: form.categoryId ? (form.categoryId as any) : undefined,
+					categoryId: form.categoryId || undefined,
+					productType: form.productType || undefined,
+					activeIngredient: form.activeIngredient || undefined,
+					strength: form.strength || undefined,
+					administrationRoute: form.administrationRoute || undefined,
+					dosageForm: form.dosageForm || undefined,
+					packagingSpecification: form.packagingSpecification || undefined,
+					drugGroup: form.drugGroup || undefined,
+					shelfLife: form.shelfLife || undefined,
+					registrationNumber: form.registrationNumber || undefined,
+					registrationExpiryDate: parseOptionalDate(
+						form.registrationExpiryDate,
+					),
+					manufacturer: form.manufacturer || undefined,
+					countryOfOrigin: form.countryOfOrigin || undefined,
 					description: form.description || undefined,
 					unit: form.unit,
-					purchasePrice: Number.parseFloat(form.purchasePrice),
-					salePrice: Number.parseFloat(form.salePrice),
-					minStock: Number.parseInt(form.minStock),
+					declarationDate: parseOptionalDate(form.declarationDate),
+					declarationUnit: form.declarationUnit || undefined,
+					declarationDecisionNumber:
+						form.declarationDecisionNumber || undefined,
+					declarationValidity: form.declarationValidity || undefined,
+					biddingUnit: form.biddingUnit || undefined,
+					indication: form.indication || undefined,
+					prescriptionType: form.prescriptionType || undefined,
+					vatRate: parseOptionalNumber(form.vatRate),
+					isActive: form.isActive === "active",
+					purchasePrice,
+					salePrice,
+					minStock,
 				});
 				toast.success("Đã cập nhật sản phẩm thành công");
 			} else {
 				await createProduct({
 					name: form.name,
 					sku: form.sku,
-					categoryId: form.categoryId ? (form.categoryId as any) : undefined,
+					categoryId: form.categoryId || undefined,
+					productType: form.productType || undefined,
+					activeIngredient: form.activeIngredient || undefined,
+					strength: form.strength || undefined,
+					administrationRoute: form.administrationRoute || undefined,
+					dosageForm: form.dosageForm || undefined,
+					packagingSpecification: form.packagingSpecification || undefined,
+					drugGroup: form.drugGroup || undefined,
+					shelfLife: form.shelfLife || undefined,
+					registrationNumber: form.registrationNumber || undefined,
+					registrationExpiryDate: parseOptionalDate(
+						form.registrationExpiryDate,
+					),
+					manufacturer: form.manufacturer || undefined,
+					countryOfOrigin: form.countryOfOrigin || undefined,
 					description: form.description || undefined,
 					unit: form.unit,
-					purchasePrice: Number.parseFloat(form.purchasePrice),
-					salePrice: Number.parseFloat(form.salePrice),
-					minStock: Number.parseInt(form.minStock),
+					declarationDate: parseOptionalDate(form.declarationDate),
+					declarationUnit: form.declarationUnit || undefined,
+					declarationDecisionNumber:
+						form.declarationDecisionNumber || undefined,
+					declarationValidity: form.declarationValidity || undefined,
+					biddingUnit: form.biddingUnit || undefined,
+					indication: form.indication || undefined,
+					prescriptionType: form.prescriptionType || undefined,
+					vatRate: parseOptionalNumber(form.vatRate),
+					isActive: form.isActive === "active",
+					purchasePrice,
+					salePrice,
+					minStock,
 				});
 				toast.success("Đã tạo sản phẩm thành công");
 			}
 			setDialogOpen(false);
-			setForm(initialForm);
-			setEditingId(null);
-		} catch (error: any) {
-			toast.error(error.message || "Không thể lưu sản phẩm");
+			resetProductDialog();
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể lưu sản phẩm"));
 		}
 	};
 
-	const handleEdit = (product: any) => {
+	const handleEdit = (product: ProductRow) => {
 		setEditingId(product._id);
 		setForm({
 			name: product.name,
 			sku: product.sku,
 			categoryId: product.categoryId || "",
+			productType: product.productType || "",
+			activeIngredient: product.activeIngredient || "",
+			strength: product.strength || "",
+			administrationRoute: product.administrationRoute || "",
+			dosageForm: product.dosageForm || "",
+			packagingSpecification: product.packagingSpecification || "",
+			drugGroup: product.drugGroup || "",
+			shelfLife: product.shelfLife || "",
+			registrationNumber: product.registrationNumber || "",
+			registrationExpiryDate: toDateInputValue(product.registrationExpiryDate),
+			manufacturer: product.manufacturer || "",
+			countryOfOrigin: product.countryOfOrigin || "",
 			description: product.description || "",
 			unit: product.unit,
+			declarationDate: toDateInputValue(product.declarationDate),
+			declarationUnit: product.declarationUnit || "",
+			declarationDecisionNumber: product.declarationDecisionNumber || "",
+			declarationValidity: product.declarationValidity || "",
+			biddingUnit: product.biddingUnit || "",
+			indication: product.indication || "",
+			prescriptionType: product.prescriptionType || "",
+			vatRate:
+				typeof product.vatRate === "number" ? product.vatRate.toString() : "",
+			isActive: product.isActive ? "active" : "inactive",
 			purchasePrice: product.purchasePrice.toString(),
 			salePrice: product.salePrice.toString(),
 			minStock: product.minStock.toString(),
+		});
+		setFormMeta({
+			createdAt: product.createdAt,
+			updatedAt: product.updatedAt,
 		});
 		setDialogOpen(true);
 	};
@@ -231,16 +442,16 @@ function ProductsPage() {
 	const handleDelete = async () => {
 		if (!deletingId) return;
 		try {
-			await deleteProduct({ id: deletingId as any });
+			await deleteProduct({ id: deletingId });
 			toast.success("Đã xóa sản phẩm thành công");
 			setDeleteDialogOpen(false);
 			setDeletingId(null);
-		} catch (error: any) {
-			toast.error(error.message || "Không thể xóa sản phẩm");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể xóa sản phẩm"));
 		}
 	};
 
-	const handleToggleActive = (product: any) => {
+	const handleToggleActive = (product: ProductRow) => {
 		setToggleConfirmProduct(product);
 	};
 
@@ -248,7 +459,7 @@ function ProductsPage() {
 		if (!toggleConfirmProduct) return;
 		try {
 			await updateProduct({
-				id: toggleConfirmProduct._id as any,
+				id: toggleConfirmProduct._id,
 				isActive: !toggleConfirmProduct.isActive,
 			});
 			toast.success(
@@ -256,8 +467,8 @@ function ProductsPage() {
 					? `Đã ngừng theo dõi "${toggleConfirmProduct.name}"`
 					: `Đã theo dõi lại "${toggleConfirmProduct.name}"`,
 			);
-		} catch (error: any) {
-			toast.error(error.message || "Không thể cập nhật trạng thái");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể cập nhật trạng thái"));
 		} finally {
 			setToggleConfirmProduct(null);
 		}
@@ -281,6 +492,18 @@ function ProductsPage() {
 		return unit?.label || unitValue;
 	};
 
+	const getPrescriptionTypeLabel = (value: ProductForm["prescriptionType"]) => {
+		if (!value) return "";
+		const option = PRESCRIPTION_TYPE_OPTIONS.find(
+			(item) => item.value === value,
+		);
+		return option?.label || value;
+	};
+
+	const getSellingStatusLabel = (value: ProductForm["isActive"]) => {
+		return value === "active" ? "Đang bán" : "Ngừng bán";
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -288,184 +511,520 @@ function ProductsPage() {
 					<h2 className="font-bold text-2xl tracking-tight">Sản phẩm</h2>
 					<p className="text-muted-foreground">Quản lý danh mục sản phẩm</p>
 				</div>
-				<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+				<Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
 					<DialogTrigger asChild>
 						<Button
 							onClick={() => {
-								setForm(initialForm);
-								setEditingId(null);
+								resetProductDialog();
 							}}
 						>
 							<Plus className="mr-2 h-4 w-4" />
 							Thêm sản phẩm
 						</Button>
 					</DialogTrigger>
-					<DialogContent className="sm:max-w-[500px]">
+					<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[960px]">
 						<form onSubmit={handleSubmit}>
 							<DialogHeader>
 								<DialogTitle>
-									{editingId ? "Sửa sản phẩm" : "Thêm sản phẩm"}
+									{editingId ? "Cập nhật sản phẩm" : "Thêm sản phẩm"}
 								</DialogTitle>
 								<DialogDescription>
-									Nhập thông tin sản phẩm bên dưới.
+									Khai báo đầy đủ thông tin sản phẩm theo nhóm hồ sơ dược và
+									thông tin quản lý nội bộ.
 								</DialogDescription>
 							</DialogHeader>
-							<div className="grid gap-4 py-4">
-								<div className="grid grid-cols-2 gap-4">
+							<div className="space-y-6 py-4">
+								<div className="grid gap-4 md:grid-cols-3">
 									<div className="space-y-2">
-										<Label htmlFor="name">Tên *</Label>
-										<Input
-											id="name"
-											value={form.name}
-											onChange={(e) =>
-												setForm({ ...form, name: e.target.value })
+										<Label htmlFor="supplyScope">
+											Hàng hóa/Dịch vụ cung cấp
+										</Label>
+										<Input id="supplyScope" value="Hàng hóa" disabled />
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="productType">Phân loại</Label>
+										<Select
+											value={form.productType}
+											onValueChange={(value) =>
+												updateFormField(
+													"productType",
+													value as ProductForm["productType"],
+												)
 											}
-											required
-										/>
+										>
+											<SelectTrigger id="productType">
+												<SelectValue placeholder="Chọn phân loại" />
+											</SelectTrigger>
+											<SelectContent>
+												{PRODUCT_TYPE_OPTIONS.map((option) => (
+													<SelectItem key={option.value} value={option.value}>
+														{option.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="sku">Mã SKU *</Label>
 										<Input
 											id="sku"
 											value={form.sku}
-											onChange={(e) =>
-												setForm({ ...form, sku: e.target.value })
-											}
+											onChange={(e) => updateFormField("sku", e.target.value)}
 											required
 										/>
 									</div>
 								</div>
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<div className="flex items-center justify-between">
-											<Label htmlFor="category">Danh mục</Label>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-6 px-2 text-teal-600 text-xs hover:text-teal-700"
-												onClick={() => setQuickCategoryOpen(true)}
-											>
-												<FolderPlus className="mr-1 h-3 w-3" />
-												Thêm
-											</Button>
+
+								<div className="rounded-lg border bg-muted/20 p-4">
+									<div className="mb-4">
+										<h3 className="font-semibold text-base">
+											Thông tin cơ bản
+										</h3>
+										<p className="text-muted-foreground text-sm">
+											Thông tin hồ sơ sản phẩm và đặc tính chuyên môn.
+										</p>
+									</div>
+									<div className="grid gap-4 md:grid-cols-2">
+										<div className="space-y-2">
+											<Label htmlFor="name">Tên thuốc *</Label>
+											<Input
+												id="name"
+												value={form.name}
+												onChange={(e) =>
+													updateFormField("name", e.target.value)
+												}
+												required
+											/>
 										</div>
-										<Select
-											value={form.categoryId || ""}
-											onValueChange={(v) =>
-												v &&
-												v !== "_none" &&
-												setForm({ ...form, categoryId: v })
-											}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Chọn danh mục">
-													{form.categoryId &&
-														categories?.find((c) => c._id === form.categoryId)
-															?.name}
-												</SelectValue>
-											</SelectTrigger>
-											<SelectContent>
-												{categories?.map((cat) => (
-													<SelectItem key={cat._id} value={cat._id}>
-														{cat.name}
-													</SelectItem>
-												))}
-												{(!categories || categories.length === 0) && (
-													<SelectItem value="_none" disabled>
-														Chưa có danh mục - bấm Thêm để tạo
-													</SelectItem>
-												)}
-											</SelectContent>
-										</Select>
-									</div>
-									<div className="space-y-2">
-										<div className="flex items-center justify-between">
-											<Label htmlFor="unit">Đơn vị *</Label>
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-6 px-2 text-teal-600 text-xs hover:text-teal-700"
-												onClick={() => setQuickUnitOpen(true)}
-											>
-												<Ruler className="mr-1 h-3 w-3" />
-												Thêm
-											</Button>
+										<div className="space-y-2">
+											<Label htmlFor="activeIngredient">Tên hoạt chất</Label>
+											<Input
+												id="activeIngredient"
+												value={form.activeIngredient}
+												onChange={(e) =>
+													updateFormField("activeIngredient", e.target.value)
+												}
+											/>
 										</div>
-										<Select
-											value={form.unit}
-											onValueChange={(v) => v && setForm({ ...form, unit: v })}
-											required
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Chọn đơn vị" />
-											</SelectTrigger>
-											<SelectContent className="max-h-60">
-												{allUnits.map((unit) => (
-													<SelectItem key={unit.value} value={unit.value}>
-														{unit.label}
+										<div className="space-y-2">
+											<Label htmlFor="strength">Nồng độ/Hàm lượng</Label>
+											<Input
+												id="strength"
+												value={form.strength}
+												onChange={(e) =>
+													updateFormField("strength", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="administrationRoute">Đường dùng</Label>
+											<Input
+												id="administrationRoute"
+												value={form.administrationRoute}
+												onChange={(e) =>
+													updateFormField("administrationRoute", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="dosageForm">Dạng bào chế</Label>
+											<Input
+												id="dosageForm"
+												value={form.dosageForm}
+												onChange={(e) =>
+													updateFormField("dosageForm", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="packagingSpecification">
+												Quy cách đóng gói
+											</Label>
+											<Input
+												id="packagingSpecification"
+												value={form.packagingSpecification}
+												onChange={(e) =>
+													updateFormField(
+														"packagingSpecification",
+														e.target.value,
+													)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="drugGroup">Nhóm thuốc</Label>
+											<Input
+												id="drugGroup"
+												value={form.drugGroup}
+												onChange={(e) =>
+													updateFormField("drugGroup", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="shelfLife">Tuổi thọ</Label>
+											<Input
+												id="shelfLife"
+												value={form.shelfLife}
+												onChange={(e) =>
+													updateFormField("shelfLife", e.target.value)
+												}
+												placeholder="Ví dụ: 24 tháng"
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="registrationNumber">SDK/GPNK</Label>
+											<Input
+												id="registrationNumber"
+												value={form.registrationNumber}
+												onChange={(e) =>
+													updateFormField("registrationNumber", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="registrationExpiryDate">
+												Ngày hết hạn SDK/GPNK
+											</Label>
+											<Input
+												id="registrationExpiryDate"
+												type="date"
+												value={form.registrationExpiryDate}
+												onChange={(e) =>
+													updateFormField(
+														"registrationExpiryDate",
+														e.target.value,
+													)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="manufacturer">Cơ sở sản xuất</Label>
+											<Input
+												id="manufacturer"
+												value={form.manufacturer}
+												onChange={(e) =>
+													updateFormField("manufacturer", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="countryOfOrigin">Nước sản xuất</Label>
+											<Input
+												id="countryOfOrigin"
+												value={form.countryOfOrigin}
+												onChange={(e) =>
+													updateFormField("countryOfOrigin", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2 md:col-span-2">
+											<div className="flex items-center justify-between">
+												<Label htmlFor="category">Danh mục nội bộ</Label>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="h-6 px-2 text-teal-600 text-xs hover:text-teal-700"
+													onClick={() => setQuickCategoryOpen(true)}
+												>
+													<FolderPlus className="mr-1 h-3 w-3" />
+													Thêm danh mục
+												</Button>
+											</div>
+											<Select
+												value={form.categoryId || ""}
+												onValueChange={(value) => {
+													if (value === "_clear") {
+														updateFormField("categoryId", "");
+													} else if (value && value !== "_none") {
+														updateFormField(
+															"categoryId",
+															value as Id<"categories">,
+														);
+													}
+												}}
+											>
+												<SelectTrigger id="category">
+													<SelectValue placeholder="Chọn danh mục nội bộ">
+														{form.categoryId &&
+															categories?.find(
+																(category) => category._id === form.categoryId,
+															)?.name}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="_clear">
+														Bỏ chọn danh mục
 													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
+													{categories?.map((category) => (
+														<SelectItem key={category._id} value={category._id}>
+															{category.name}
+														</SelectItem>
+													))}
+													{(!categories || categories.length === 0) && (
+														<SelectItem value="_none" disabled>
+															Chưa có danh mục, bấm "Thêm danh mục" để tạo.
+														</SelectItem>
+													)}
+												</SelectContent>
+											</Select>
+										</div>
 									</div>
 								</div>
-								<div className="space-y-2">
-									<Label htmlFor="description">Mô tả</Label>
-									<Textarea
-										id="description"
-										value={form.description}
-										onChange={(e) =>
-											setForm({ ...form, description: e.target.value })
-										}
-									/>
-								</div>
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<Label htmlFor="purchasePrice">Giá nhập *</Label>
-										<Input
-											id="purchasePrice"
-											type="number"
-											step="1"
-											min="0"
-											value={form.purchasePrice}
-											onChange={(e) =>
-												setForm({ ...form, purchasePrice: e.target.value })
-											}
-											required
-										/>
+
+								<div className="rounded-lg border bg-muted/20 p-4">
+									<div className="mb-4">
+										<h3 className="font-semibold text-base">
+											Thông tin bổ sung
+										</h3>
+										<p className="text-muted-foreground text-sm">
+											Thông tin kê khai, thuế, theo dõi và vận hành nội bộ.
+										</p>
 									</div>
-									<div className="space-y-2">
-										<Label htmlFor="salePrice">Giá bán *</Label>
-										<Input
-											id="salePrice"
-											type="number"
-											step="1"
-											min="0"
-											value={form.salePrice}
-											onChange={(e) =>
-												setForm({ ...form, salePrice: e.target.value })
-											}
-											required
-										/>
+									<div className="grid gap-4 md:grid-cols-2">
+										<div className="space-y-2">
+											<div className="flex items-center justify-between">
+												<Label htmlFor="unit">Đơn vị tính *</Label>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="h-6 px-2 text-teal-600 text-xs hover:text-teal-700"
+													onClick={() => setQuickUnitOpen(true)}
+												>
+													<Ruler className="mr-1 h-3 w-3" />
+													Thêm đơn vị
+												</Button>
+											</div>
+											<Select
+												value={form.unit}
+												onValueChange={(value) =>
+													value && updateFormField("unit", value)
+												}
+												required
+											>
+												<SelectTrigger id="unit">
+													<SelectValue placeholder="Chọn đơn vị tính">
+														{getUnitLabel(form.unit)}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent className="max-h-60">
+													{allUnits.map((unit) => (
+														<SelectItem key={unit.value} value={unit.value}>
+															{unit.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="declarationDate">Ngày kê khai</Label>
+											<Input
+												id="declarationDate"
+												type="date"
+												value={form.declarationDate}
+												onChange={(e) =>
+													updateFormField("declarationDate", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="declarationUnit">
+												Đơn vị công bố KQTT
+											</Label>
+											<Input
+												id="declarationUnit"
+												value={form.declarationUnit}
+												onChange={(e) =>
+													updateFormField("declarationUnit", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="declarationDecisionNumber">
+												Số QĐ công bố
+											</Label>
+											<Input
+												id="declarationDecisionNumber"
+												value={form.declarationDecisionNumber}
+												onChange={(e) =>
+													updateFormField(
+														"declarationDecisionNumber",
+														e.target.value,
+													)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="declarationValidity">Thời hạn</Label>
+											<Input
+												id="declarationValidity"
+												value={form.declarationValidity}
+												onChange={(e) =>
+													updateFormField("declarationValidity", e.target.value)
+												}
+												placeholder="Ví dụ: 12 tháng"
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="biddingUnit">Đơn vị trúng thầu</Label>
+											<Input
+												id="biddingUnit"
+												value={form.biddingUnit}
+												onChange={(e) =>
+													updateFormField("biddingUnit", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="prescriptionType">Tính chất</Label>
+											<Select
+												value={form.prescriptionType}
+												onValueChange={(value) =>
+													updateFormField(
+														"prescriptionType",
+														value as ProductForm["prescriptionType"],
+													)
+												}
+											>
+												<SelectTrigger id="prescriptionType">
+													<SelectValue placeholder="Chọn tính chất">
+														{getPrescriptionTypeLabel(form.prescriptionType)}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent>
+													{PRESCRIPTION_TYPE_OPTIONS.map((option) => (
+														<SelectItem key={option.value} value={option.value}>
+															{option.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="vatRate">Thuế GTGT (%)</Label>
+											<Input
+												id="vatRate"
+												type="number"
+												step="0.01"
+												min="0"
+												value={form.vatRate}
+												onChange={(e) =>
+													updateFormField("vatRate", e.target.value)
+												}
+												placeholder="Ví dụ: 5 hoặc 10"
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="trackingStatus">
+												Trạng thái bán hàng
+											</Label>
+											<Select
+												value={form.isActive}
+												onValueChange={(value) =>
+													updateFormField(
+														"isActive",
+														value as ProductForm["isActive"],
+													)
+												}
+											>
+												<SelectTrigger id="trackingStatus">
+													<SelectValue placeholder="Chọn trạng thái bán hàng">
+														{getSellingStatusLabel(form.isActive)}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="active">Đang bán</SelectItem>
+													<SelectItem value="inactive">Ngừng bán</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="purchasePrice">Giá nhập *</Label>
+											<Input
+												id="purchasePrice"
+												type="number"
+												step="1"
+												min="0"
+												value={form.purchasePrice}
+												onChange={(e) =>
+													updateFormField("purchasePrice", e.target.value)
+												}
+												required
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="salePrice">Giá bán *</Label>
+											<Input
+												id="salePrice"
+												type="number"
+												step="1"
+												min="0"
+												value={form.salePrice}
+												onChange={(e) =>
+													updateFormField("salePrice", e.target.value)
+												}
+												required
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="minStock">Mức tồn kho tối thiểu</Label>
+											<Input
+												id="minStock"
+												type="number"
+												min="0"
+												value={form.minStock}
+												onChange={(e) =>
+													updateFormField("minStock", e.target.value)
+												}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="createdAt">Ngày tạo</Label>
+											<Input
+												id="createdAt"
+												value={formatDateTime(formMeta.createdAt)}
+												disabled
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="updatedAt">Ngày cập nhật</Label>
+											<Input
+												id="updatedAt"
+												value={formatDateTime(formMeta.updatedAt)}
+												disabled
+											/>
+										</div>
+										<div className="space-y-2 md:col-span-2">
+											<Label htmlFor="indication">Chỉ định</Label>
+											<Textarea
+												id="indication"
+												value={form.indication}
+												onChange={(e) =>
+													updateFormField("indication", e.target.value)
+												}
+												rows={3}
+											/>
+										</div>
+										<div className="space-y-2 md:col-span-2">
+											<Label htmlFor="description">Ghi chú</Label>
+											<Textarea
+												id="description"
+												value={form.description}
+												onChange={(e) =>
+													updateFormField("description", e.target.value)
+												}
+												rows={3}
+											/>
+										</div>
 									</div>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="minStock">Mức tồn kho tối thiểu</Label>
-									<Input
-										id="minStock"
-										type="number"
-										min="0"
-										value={form.minStock}
-										onChange={(e) =>
-											setForm({ ...form, minStock: e.target.value })
-										}
-									/>
 								</div>
 							</div>
 							<DialogFooter>
-								<Button type="submit">{editingId ? "Cập nhật" : "Tạo"}</Button>
+								<Button type="submit">
+									{editingId ? "Lưu thay đổi" : "Tạo sản phẩm"}
+								</Button>
 							</DialogFooter>
 						</form>
 					</DialogContent>
@@ -498,7 +1057,7 @@ function ProductsPage() {
 								<SelectContent>
 									<SelectItem value="all">Tất cả</SelectItem>
 									<SelectItem value="active">Đang theo dõi</SelectItem>
-									<SelectItem value="inactive">Ngưng theo dõi</SelectItem>
+									<SelectItem value="inactive">Ngừng theo dõi</SelectItem>
 								</SelectContent>
 							</Select>
 						</div>
@@ -565,7 +1124,7 @@ function ProductsPage() {
 											) : product.isActive ? (
 												<Badge variant="default">Đang bán</Badge>
 											) : (
-												<Badge variant="secondary">Ngưng bán</Badge>
+												<Badge variant="secondary">Ngừng bán</Badge>
 											)}
 										</TableCell>
 										<TableCell className="text-center">
@@ -578,7 +1137,7 @@ function ProductsPage() {
 												{product.isActive ? (
 													<>
 														<EyeOff className="h-3.5 w-3.5" />
-														Ngưng theo dõi
+														Ngừng theo dõi
 													</>
 												) : (
 													<>
@@ -727,10 +1286,12 @@ function ProductsPage() {
 								value={quickCategoryName}
 								onChange={(e) => setQuickCategoryName(e.target.value)}
 								placeholder="Ví dụ: Kháng sinh, Giảm đau"
-								onKeyDown={(e) =>
-									e.key === "Enter" &&
-									(e.preventDefault(), handleQuickAddCategory())
-								}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										void handleQuickAddCategory();
+									}
+								}}
 							/>
 						</div>
 					</div>
@@ -764,10 +1325,12 @@ function ProductsPage() {
 								value={newUnitName}
 								onChange={(e) => setNewUnitName(e.target.value)}
 								placeholder="Ví dụ: Gói, Vỉ, Mẻ"
-								onKeyDown={(e) =>
-									e.key === "Enter" &&
-									(e.preventDefault(), handleQuickAddUnit())
-								}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										void handleQuickAddUnit();
+									}
+								}}
 							/>
 						</div>
 						<p className="text-muted-foreground text-xs">
