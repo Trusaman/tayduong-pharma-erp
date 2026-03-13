@@ -542,9 +542,57 @@ export default defineSchema({
 
 	// Employees
 	employees: defineTable({
+		portraitImage: v.optional(
+			v.object({
+				storageId: v.id("_storage"),
+				logicalPath: v.string(),
+				fileName: v.string(),
+				originalFileName: v.string(),
+				contentType: v.string(),
+				size: v.number(),
+				uploadedAt: v.number(),
+			}),
+		),
+		identityCardImage: v.optional(
+			v.object({
+				storageId: v.id("_storage"),
+				logicalPath: v.string(),
+				fileName: v.string(),
+				originalFileName: v.string(),
+				contentType: v.string(),
+				size: v.number(),
+				uploadedAt: v.number(),
+			}),
+		),
+		employeeCode: v.optional(v.string()),
 		name: v.string(),
+		gender: v.optional(v.union(v.literal("nam"), v.literal("nu"))),
+		birthDate: v.optional(v.number()),
+		identityNumber: v.optional(v.string()),
+		identityIssuedDate: v.optional(v.number()),
+		identityIssuedPlace: v.optional(v.string()),
+		nationality: v.optional(v.string()),
+		passportNumber: v.optional(v.string()),
 		email: v.string(),
 		phone: v.string(),
+		department: v.optional(v.string()),
+		taxId: v.optional(v.string()),
+		agreedSalary: v.optional(v.number()),
+		salaryCoefficient: v.optional(v.number()),
+		insuranceSalary: v.optional(v.number()),
+		contractType: v.optional(v.string()),
+		dependentCount: v.optional(v.number()),
+		customerSupplierGroup: v.optional(v.string()),
+		bankAccounts: v.optional(
+			v.array(
+				v.object({
+					accountNumber: v.string(),
+					bankName: v.string(),
+					branch: v.string(),
+					bankProvinceCity: v.string(),
+				}),
+			),
+		),
 		position: v.union(
 			v.literal("thử việc"),
 			v.literal("học việc"),
