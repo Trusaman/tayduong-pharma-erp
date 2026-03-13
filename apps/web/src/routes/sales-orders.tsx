@@ -10,14 +10,27 @@ import {
 	Plus,
 	Search,
 	Trash2,
+	TriangleAlert,
 	Truck,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -72,12 +85,23 @@ function createOrderItem(): OrderItem {
 	};
 }
 
+const getMonthInputValue = (timestamp: number) => {
+	const date = new Date(timestamp);
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	return `${date.getFullYear()}-${month}`;
+};
+
 function SalesOrdersPage() {
 	const [search, setSearch] = useState("");
+	const [monthFilter, setMonthFilter] = useState("");
 	const [formDialogOpen, setFormDialogOpen] = useState(false);
 	const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 	const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 	const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+	const [selectedOrderIds, setSelectedOrderIds] = useState<Id<"salesOrders">[]>(
+		[],
+	);
+	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 	const [customerId, setCustomerId] = useState("");
 	const [salesmanId, setSalesmanId] = useState("");
 	const [notes, setNotes] = useState("");
@@ -132,13 +156,24 @@ function SalesOrdersPage() {
 	const deleteOrder = useMutation(api.salesOrders.remove);
 	const isEditingOrder = editingOrderId !== null;
 	const editingOrderHasFulfilledItems =
-		editingOrderDetails?.items.some((item) => item.fulfilledQuantity > 0) ?? false;
+		editingOrderDetails?.items.some((item) => item.fulfilledQuantity > 0) ??
+		false;
 
-	const filteredOrders = orders?.filter(
-		(o) =>
-			o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
-			(o.customer?.name ?? "").toLowerCase().includes(search.toLowerCase()),
-	);
+	const filteredOrders = orders?.filter((order) => {
+		const matchesSearch =
+			order.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
+			(order.customer?.name ?? "").toLowerCase().includes(search.toLowerCase());
+		const matchesMonth =
+			!monthFilter || getMonthInputValue(order.orderDate) === monthFilter;
+		return matchesSearch && matchesMonth;
+	});
+	const visibleOrderIds = filteredOrders?.map((order) => order._id) ?? [];
+	const selectedOrders =
+		filteredOrders?.filter((order) => selectedOrderIds.includes(order._id)) ??
+		[];
+	const allVisibleOrdersSelected =
+		visibleOrderIds.length > 0 &&
+		visibleOrderIds.every((id) => selectedOrderIds.includes(id));
 
 	const handleAddItem = () => {
 		setItems([...items, createOrderItem()]);
@@ -203,19 +238,25 @@ function SalesOrdersPage() {
 		setItems(
 			editingOrderDetails.items.length > 0
 				? editingOrderDetails.items.map((item) => ({
-					...createOrderItem(),
-					productId: item.productId,
-					quantity: String(item.quantity),
-					unitPrice: String(item.baseUnitPrice ?? item.unitPrice),
-					discountPercent:
-						item.discountPercent !== undefined
-							? String(item.discountPercent)
-							: "",
-					hasManualDiscount: item.discountPercent !== undefined,
-				}))
+						...createOrderItem(),
+						productId: item.productId,
+						quantity: String(item.quantity),
+						unitPrice: String(item.baseUnitPrice ?? item.unitPrice),
+						discountPercent:
+							item.discountPercent !== undefined
+								? String(item.discountPercent)
+								: "",
+						hasManualDiscount: item.discountPercent !== undefined,
+					}))
 				: [createOrderItem()],
 		);
 	}, [editingOrderDetails, editingOrderId]);
+
+	useEffect(() => {
+		setSelectedOrderIds((current) =>
+			current.filter((id) => filteredOrders?.some((order) => order._id === id)),
+		);
+	}, [filteredOrders]);
 
 	const handleOrderSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -312,10 +353,49 @@ function SalesOrdersPage() {
 	const handleDelete = async (orderId: string) => {
 		try {
 			await deleteOrder({ id: orderId as Id<"salesOrders"> });
+			setSelectedOrderIds((current) => current.filter((id) => id !== orderId));
 			toast.success("Đã xóa đơn hàng thành công");
 		} catch (error) {
 			toast.error(
 				error instanceof Error ? error.message : "Không thể xóa đơn hàng",
+			);
+		}
+	};
+
+	const toggleOrderSelection = (
+		orderId: Id<"salesOrders">,
+		checked: boolean,
+	) => {
+		setSelectedOrderIds((current) => {
+			if (checked) {
+				return current.includes(orderId) ? current : [...current, orderId];
+			}
+			return current.filter((id) => id !== orderId);
+		});
+	};
+
+	const toggleSelectAllOrders = (checked: boolean) => {
+		setSelectedOrderIds((current) => {
+			if (checked) {
+				return Array.from(new Set([...current, ...visibleOrderIds]));
+			}
+			return current.filter((id) => !visibleOrderIds.includes(id));
+		});
+	};
+
+	const handleBulkDelete = async () => {
+		if (selectedOrderIds.length === 0) return;
+
+		try {
+			await Promise.all(selectedOrderIds.map((id) => deleteOrder({ id })));
+			toast.success(`Đã xóa ${selectedOrderIds.length} đơn hàng thành công`);
+			setSelectedOrderIds([]);
+			setBulkDeleteDialogOpen(false);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa các đơn hàng đã chọn",
 			);
 		}
 	};
@@ -447,340 +527,343 @@ function SalesOrdersPage() {
 							</div>
 						) : (
 							<form onSubmit={handleOrderSubmit}>
-							<DialogHeader>
-								<DialogTitle>
-									{isEditingOrder ? "Sửa đơn bán hàng" : "Tạo đơn bán hàng"}
-								</DialogTitle>
-								<DialogDescription>
-									{isEditingOrder
-										? "Cập nhật thông tin đơn bán hàng hiện tại."
-										: "Tạo đơn bán hàng mới cho khách."}
-								</DialogDescription>
-							</DialogHeader>
-							<div className="grid gap-4 py-4">
-								{isEditingOrder && (
-									<>
-										<div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-											<p className="font-medium">Thông tin chỉnh sửa</p>
-											<p className="mt-1">
-												{editingOrderHasFulfilledItems
-													? "Đơn đã có giao hàng nên chỉ cho sửa ghi chú. Các trường cấu trúc được khóa để tránh lệch tồn kho và đối soát."
-													: "Bạn có thể sửa toàn bộ thông tin đơn và hệ thống sẽ lưu lịch sử thay đổi. Ô %CK đang giữ theo giá trị hiện tại; xóa ô này nếu muốn áp dụng lại chiết khấu tự động."}
-											</p>
+								<DialogHeader>
+									<DialogTitle>
+										{isEditingOrder ? "Sửa đơn bán hàng" : "Tạo đơn bán hàng"}
+									</DialogTitle>
+									<DialogDescription>
+										{isEditingOrder
+											? "Cập nhật thông tin đơn bán hàng hiện tại."
+											: "Tạo đơn bán hàng mới cho khách."}
+									</DialogDescription>
+								</DialogHeader>
+								<div className="grid gap-4 py-4">
+									{isEditingOrder && (
+										<>
+											<div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
+												<p className="font-medium">Thông tin chỉnh sửa</p>
+												<p className="mt-1">
+													{editingOrderHasFulfilledItems
+														? "Đơn đã có giao hàng nên chỉ cho sửa ghi chú. Các trường cấu trúc được khóa để tránh lệch tồn kho và đối soát."
+														: "Bạn có thể sửa toàn bộ thông tin đơn và hệ thống sẽ lưu lịch sử thay đổi. Ô %CK đang giữ theo giá trị hiện tại; xóa ô này nếu muốn áp dụng lại chiết khấu tự động."}
+												</p>
+											</div>
+											<div className="space-y-2">
+												<Label>Người sửa đơn *</Label>
+												<Input
+													value={updatedByName}
+													onChange={(e) => setUpdatedByName(e.target.value)}
+													placeholder="Nhập tên người sửa"
+													required
+												/>
+											</div>
+										</>
+									)}
+									<div className="grid grid-cols-2 gap-4">
+										<div className="space-y-2">
+											<Label>Khách hàng *</Label>
+											<Select
+												value={customerId}
+												onValueChange={(v) => v && setCustomerId(v)}
+												required
+												disabled={editingOrderHasFulfilledItems}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Chọn khách hàng">
+														{customerId
+															? (customers?.find((c) => c._id === customerId)
+																	?.name ?? "Chọn khách hàng")
+															: "Chọn khách hàng"}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent>
+													{customers?.map((c) => (
+														<SelectItem key={c._id} value={c._id}>
+															{c.name}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										</div>
 										<div className="space-y-2">
-											<Label>Người sửa đơn *</Label>
-											<Input
-												value={updatedByName}
-												onChange={(e) => setUpdatedByName(e.target.value)}
-												placeholder="Nhập tên người sửa"
+											<Label>Nhân viên bán hàng *</Label>
+											<Select
+												value={salesmanId}
+												onValueChange={(v) => v && setSalesmanId(v)}
 												required
-											/>
+												disabled={editingOrderHasFulfilledItems}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Chọn nhân viên">
+														{salesmanId
+															? (salesmen?.find((s) => s._id === salesmanId)
+																	?.name ?? "Chọn nhân viên")
+															: "Chọn nhân viên"}
+													</SelectValue>
+												</SelectTrigger>
+												<SelectContent>
+													{salesmen?.map((s) => (
+														<SelectItem key={s._id} value={s._id}>
+															{s.name}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										</div>
-									</>
-								)}
-								<div className="grid grid-cols-2 gap-4">
-									<div className="space-y-2">
-										<Label>Khách hàng *</Label>
-										<Select
-											value={customerId}
-											onValueChange={(v) => v && setCustomerId(v)}
-											required
-											disabled={editingOrderHasFulfilledItems}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Chọn khách hàng">
-													{customerId
-														? (customers?.find((c) => c._id === customerId)
-																?.name ?? "Chọn khách hàng")
-														: "Chọn khách hàng"}
-												</SelectValue>
-											</SelectTrigger>
-											<SelectContent>
-												{customers?.map((c) => (
-													<SelectItem key={c._id} value={c._id}>
-														{c.name}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
 									</div>
-									<div className="space-y-2">
-										<Label>Nhân viên bán hàng *</Label>
-										<Select
-											value={salesmanId}
-											onValueChange={(v) => v && setSalesmanId(v)}
-											required
-											disabled={editingOrderHasFulfilledItems}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Chọn nhân viên">
-													{salesmanId
-														? (salesmen?.find((s) => s._id === salesmanId)
-																?.name ?? "Chọn nhân viên")
-														: "Chọn nhân viên"}
-												</SelectValue>
-											</SelectTrigger>
-											<SelectContent>
-												{salesmen?.map((s) => (
-													<SelectItem key={s._id} value={s._id}>
-														{s.name}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									</div>
-								</div>
 
-								<div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<Label>Sản phẩm *</Label>
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={handleAddItem}
-											disabled={editingOrderHasFulfilledItems}
-										>
-											<Plus className="mr-1 h-4 w-4" /> Thêm sản phẩm
-										</Button>
-									</div>
-									{/* Header labels */}
-									<div className="grid grid-cols-12 gap-2 px-1">
-										<div className="col-span-4 font-medium text-muted-foreground text-xs">
-											Sản phẩm
+									<div className="space-y-2">
+										<div className="flex items-center justify-between">
+											<Label>Sản phẩm *</Label>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={handleAddItem}
+												disabled={editingOrderHasFulfilledItems}
+											>
+												<Plus className="mr-1 h-4 w-4" /> Thêm sản phẩm
+											</Button>
 										</div>
-										<div className="col-span-2 font-medium text-muted-foreground text-xs">
-											Số lượng
-										</div>
-										<div className="col-span-2 font-medium text-muted-foreground text-xs">
-											Đơn giá
-										</div>
-										<div className="col-span-2 font-medium text-muted-foreground text-xs">
-											%CK
-										</div>
-										<div className="col-span-2 text-right font-medium text-muted-foreground text-xs">
-											Thành tiền
-										</div>
-									</div>
-									{items.map((item, index) => (
-										<div key={item.rowId} className="space-y-1">
-											<div className="grid grid-cols-12 items-center gap-2">
-												<div className="col-span-4">
-													<Select
-														value={item.productId}
-														onValueChange={(v) => {
-															if (!v) return;
-															handleItemChange(index, "productId", v);
-															// Pre-fill discount from rules when product changes
-															const auto = getAutoDiscountPercent(v);
-															if (
-																auto !== undefined &&
-																!items[index].hasManualDiscount
-															) {
-																handleItemChange(
-																	index,
-																	"discountPercent",
-																	String(auto),
-																);
-															}
-														}}
-														disabled={editingOrderHasFulfilledItems}
-													>
-														<SelectTrigger className="h-10">
-															<SelectValue placeholder="Sản phẩm">
-																{item.productId
-																	? (products?.find(
-																			(p) => p._id === item.productId,
-																		)?.name ?? "Sản phẩm")
-																	: "Sản phẩm"}
-															</SelectValue>
-														</SelectTrigger>
-														<SelectContent>
-															{products?.map((p) => (
-																<SelectItem key={p._id} value={p._id}>
-																	{p.name}
-																</SelectItem>
-															))}
-														</SelectContent>
-													</Select>
-												</div>
-												<div className="col-span-2">
-													<Input
-														type="number"
-														placeholder="1"
-														value={item.quantity}
-														onChange={(e) =>
-															handleItemChange(
-																index,
-																"quantity",
-																e.target.value,
-															)
-														}
-														className="h-10"
-														min="1"
-														disabled={editingOrderHasFulfilledItems}
-													/>
-												</div>
-												<div className="col-span-2">
-													<Input
-														type="number"
-														placeholder="0"
-														value={item.unitPrice}
-														onChange={(e) =>
-															handleItemChange(
-																index,
-																"unitPrice",
-																e.target.value,
-															)
-														}
-														className="h-10"
-														min="0"
-														disabled={editingOrderHasFulfilledItems}
-													/>
-												</div>
-												{/* Discount % input */}
-												<div className="col-span-2">
-													<div className="relative">
-														<Input
-															type="number"
-															placeholder={
-																item.productId &&
-																getAutoDiscountPercent(item.productId) !==
-																	undefined
-																	? String(
-																			getAutoDiscountPercent(item.productId),
-																		)
-																	: "0"
-															}
-															value={item.discountPercent}
-															onChange={(e) => {
-																const value = e.target.value;
-																setItems((currentItems) => {
-																	const nextItems = [...currentItems];
-																	nextItems[index] = {
-																		...nextItems[index],
-																		discountPercent: value,
-																		hasManualDiscount: value !== "",
-																	};
-																	return nextItems;
-																});
-															}}
-														className="h-10 pr-6"
-														min="0"
-														max="100"
-														disabled={editingOrderHasFulfilledItems}
-													/>
-														<span className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground text-xs">
-															%
-														</span>
-													</div>
-												</div>
-												<div className="col-span-2 flex items-center justify-end gap-1">
-													{(() => {
-														const qty = Number(item.quantity);
-														const price = Number(item.unitPrice);
-														const disc =
-															item.discountPercent !== ""
-																? Number(item.discountPercent)
-																: getAutoDiscountPercent(item.productId) || 0;
-														const total =
-															qty && price
-																? qty * price * (1 - disc / 100)
-																: null;
-														return (
-															<span className="font-medium text-sm tabular-nums">
-																{total !== null ? formatCurrency(total) : "—"}
-															</span>
-														);
-													})()}
-													<Button
-														type="button"
-														variant="ghost"
-														size="icon"
-														className="h-8 w-8 shrink-0"
-														onClick={() => handleRemoveItem(index)}
-														disabled={items.length === 1 || editingOrderHasFulfilledItems}
-													>
-														<Trash2 className="h-4 w-4 text-destructive" />
-													</Button>
-												</div>
+										{/* Header labels */}
+										<div className="grid grid-cols-12 gap-2 px-1">
+											<div className="col-span-4 font-medium text-muted-foreground text-xs">
+												Sản phẩm
+											</div>
+											<div className="col-span-2 font-medium text-muted-foreground text-xs">
+												Số lượng
+											</div>
+											<div className="col-span-2 font-medium text-muted-foreground text-xs">
+												Đơn giá
+											</div>
+											<div className="col-span-2 font-medium text-muted-foreground text-xs">
+												%CK
+											</div>
+											<div className="col-span-2 text-right font-medium text-muted-foreground text-xs">
+												Thành tiền
 											</div>
 										</div>
-									))}
-									{/* Total summary */}
-									{items.some((i) => i.quantity && i.unitPrice) && (
-										<div className="mt-2 space-y-1 rounded-md border bg-muted/40 px-4 py-3">
-											{(() => {
-												const subtotal = items.reduce(
-													(sum, i) =>
-														i.quantity && i.unitPrice
-															? sum + Number(i.quantity) * Number(i.unitPrice)
-															: sum,
-													0,
-												);
-												const totalDiscount = items.reduce((sum, i) => {
-													if (!i.quantity || !i.unitPrice) return sum;
-													const pct =
-														i.discountPercent !== ""
-															? Number(i.discountPercent)
-															: getAutoDiscountPercent(i.productId) || 0;
-													return (
-														sum +
-														Number(i.quantity) *
-															Number(i.unitPrice) *
-															(pct / 100)
-													);
-												}, 0);
-												const grandTotal = subtotal - totalDiscount;
-												return (
-													<>
-														<div className="flex justify-between text-sm">
-															<span className="text-muted-foreground">
-																Tổng cộng
-															</span>
-															<span className="font-medium">
-																{formatCurrency(subtotal)}
+										{items.map((item, index) => (
+											<div key={item.rowId} className="space-y-1">
+												<div className="grid grid-cols-12 items-center gap-2">
+													<div className="col-span-4">
+														<Select
+															value={item.productId}
+															onValueChange={(v) => {
+																if (!v) return;
+																handleItemChange(index, "productId", v);
+																// Pre-fill discount from rules when product changes
+																const auto = getAutoDiscountPercent(v);
+																if (
+																	auto !== undefined &&
+																	!items[index].hasManualDiscount
+																) {
+																	handleItemChange(
+																		index,
+																		"discountPercent",
+																		String(auto),
+																	);
+																}
+															}}
+															disabled={editingOrderHasFulfilledItems}
+														>
+															<SelectTrigger className="h-10">
+																<SelectValue placeholder="Sản phẩm">
+																	{item.productId
+																		? (products?.find(
+																				(p) => p._id === item.productId,
+																			)?.name ?? "Sản phẩm")
+																		: "Sản phẩm"}
+																</SelectValue>
+															</SelectTrigger>
+															<SelectContent>
+																{products?.map((p) => (
+																	<SelectItem key={p._id} value={p._id}>
+																		{p.name}
+																	</SelectItem>
+																))}
+															</SelectContent>
+														</Select>
+													</div>
+													<div className="col-span-2">
+														<Input
+															type="number"
+															placeholder="1"
+															value={item.quantity}
+															onChange={(e) =>
+																handleItemChange(
+																	index,
+																	"quantity",
+																	e.target.value,
+																)
+															}
+															className="h-10"
+															min="1"
+															disabled={editingOrderHasFulfilledItems}
+														/>
+													</div>
+													<div className="col-span-2">
+														<Input
+															type="number"
+															placeholder="0"
+															value={item.unitPrice}
+															onChange={(e) =>
+																handleItemChange(
+																	index,
+																	"unitPrice",
+																	e.target.value,
+																)
+															}
+															className="h-10"
+															min="0"
+															disabled={editingOrderHasFulfilledItems}
+														/>
+													</div>
+													{/* Discount % input */}
+													<div className="col-span-2">
+														<div className="relative">
+															<Input
+																type="number"
+																placeholder={
+																	item.productId &&
+																	getAutoDiscountPercent(item.productId) !==
+																		undefined
+																		? String(
+																				getAutoDiscountPercent(item.productId),
+																			)
+																		: "0"
+																}
+																value={item.discountPercent}
+																onChange={(e) => {
+																	const value = e.target.value;
+																	setItems((currentItems) => {
+																		const nextItems = [...currentItems];
+																		nextItems[index] = {
+																			...nextItems[index],
+																			discountPercent: value,
+																			hasManualDiscount: value !== "",
+																		};
+																		return nextItems;
+																	});
+																}}
+																className="h-10 pr-6"
+																min="0"
+																max="100"
+																disabled={editingOrderHasFulfilledItems}
+															/>
+															<span className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground text-xs">
+																%
 															</span>
 														</div>
-														{totalDiscount > 0 && (
+													</div>
+													<div className="col-span-2 flex items-center justify-end gap-1">
+														{(() => {
+															const qty = Number(item.quantity);
+															const price = Number(item.unitPrice);
+															const disc =
+																item.discountPercent !== ""
+																	? Number(item.discountPercent)
+																	: getAutoDiscountPercent(item.productId) || 0;
+															const total =
+																qty && price
+																	? qty * price * (1 - disc / 100)
+																	: null;
+															return (
+																<span className="font-medium text-sm tabular-nums">
+																	{total !== null ? formatCurrency(total) : "—"}
+																</span>
+															);
+														})()}
+														<Button
+															type="button"
+															variant="ghost"
+															size="icon"
+															className="h-8 w-8 shrink-0"
+															onClick={() => handleRemoveItem(index)}
+															disabled={
+																items.length === 1 ||
+																editingOrderHasFulfilledItems
+															}
+														>
+															<Trash2 className="h-4 w-4 text-destructive" />
+														</Button>
+													</div>
+												</div>
+											</div>
+										))}
+										{/* Total summary */}
+										{items.some((i) => i.quantity && i.unitPrice) && (
+											<div className="mt-2 space-y-1 rounded-md border bg-muted/40 px-4 py-3">
+												{(() => {
+													const subtotal = items.reduce(
+														(sum, i) =>
+															i.quantity && i.unitPrice
+																? sum + Number(i.quantity) * Number(i.unitPrice)
+																: sum,
+														0,
+													);
+													const totalDiscount = items.reduce((sum, i) => {
+														if (!i.quantity || !i.unitPrice) return sum;
+														const pct =
+															i.discountPercent !== ""
+																? Number(i.discountPercent)
+																: getAutoDiscountPercent(i.productId) || 0;
+														return (
+															sum +
+															Number(i.quantity) *
+																Number(i.unitPrice) *
+																(pct / 100)
+														);
+													}, 0);
+													const grandTotal = subtotal - totalDiscount;
+													return (
+														<>
 															<div className="flex justify-between text-sm">
 																<span className="text-muted-foreground">
-																	Chiết khấu
+																	Tổng cộng
 																</span>
-																<span className="font-medium text-teal-700">
-																	- {formatCurrency(totalDiscount)}
+																<span className="font-medium">
+																	{formatCurrency(subtotal)}
 																</span>
 															</div>
-														)}
-														<div className="mt-1 flex justify-between border-t pt-1 text-sm">
-															<span className="font-semibold">Thực thu</span>
-															<span className="font-bold text-primary">
-																{formatCurrency(grandTotal)}
-															</span>
-														</div>
-													</>
-												);
-											})()}
-										</div>
-									)}
-								</div>
+															{totalDiscount > 0 && (
+																<div className="flex justify-between text-sm">
+																	<span className="text-muted-foreground">
+																		Chiết khấu
+																	</span>
+																	<span className="font-medium text-teal-700">
+																		- {formatCurrency(totalDiscount)}
+																	</span>
+																</div>
+															)}
+															<div className="mt-1 flex justify-between border-t pt-1 text-sm">
+																<span className="font-semibold">Thực thu</span>
+																<span className="font-bold text-primary">
+																	{formatCurrency(grandTotal)}
+																</span>
+															</div>
+														</>
+													);
+												})()}
+											</div>
+										)}
+									</div>
 
-								<div className="space-y-2">
-									<Label>Ghi chú</Label>
-									<Textarea
-										value={notes}
-										onChange={(e) => setNotes(e.target.value)}
-										placeholder="Ghi chú thêm..."
-									/>
+									<div className="space-y-2">
+										<Label>Ghi chú</Label>
+										<Textarea
+											value={notes}
+											onChange={(e) => setNotes(e.target.value)}
+											placeholder="Ghi chú thêm..."
+										/>
+									</div>
 								</div>
-							</div>
-							<DialogFooter>
-								<Button type="submit">
-									{isEditingOrder ? "Lưu thay đổi" : "Tạo đơn"}
-								</Button>
-							</DialogFooter>
-						</form>
+								<DialogFooter>
+									<Button type="submit">
+										{isEditingOrder ? "Lưu thay đổi" : "Tạo đơn"}
+									</Button>
+								</DialogFooter>
+							</form>
 						)}
 					</DialogContent>
 				</Dialog>
@@ -788,16 +871,85 @@ function SalesOrdersPage() {
 
 			<Card>
 				<CardHeader>
-					<div className="flex items-center justify-between">
-						<CardTitle>Danh sách đơn hàng</CardTitle>
-						<div className="relative w-64">
-							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+					<div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+						<div>
+							<CardTitle>Danh sách đơn hàng</CardTitle>
+							<p className="mt-1 text-muted-foreground text-sm">
+								Bạn có thể chọn và xóa tất cả đơn hàng đang hiển thị.
+							</p>
+						</div>
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+							<div className="relative w-full sm:w-64">
+								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+								<Input
+									placeholder="Tìm kiếm đơn hàng..."
+									value={search}
+									onChange={(e) => setSearch(e.target.value)}
+									className="pl-8"
+								/>
+							</div>
 							<Input
-								placeholder="Tìm kiếm đơn hàng..."
-								value={search}
-								onChange={(e) => setSearch(e.target.value)}
-								className="pl-8"
+								type="month"
+								value={monthFilter}
+								onChange={(e) => setMonthFilter(e.target.value)}
+								className="w-full sm:w-44"
 							/>
+							{monthFilter && (
+								<Button variant="outline" onClick={() => setMonthFilter("")}>
+									Xóa lọc tháng
+								</Button>
+							)}
+							<AlertDialog
+								open={bulkDeleteDialogOpen}
+								onOpenChange={setBulkDeleteDialogOpen}
+							>
+								<Button
+									variant="destructive"
+									disabled={selectedOrderIds.length === 0}
+									onClick={() => setBulkDeleteDialogOpen(true)}
+								>
+									<Trash2 className="mr-2 h-4 w-4" />
+									Xóa đã chọn ({selectedOrderIds.length})
+								</Button>
+								<AlertDialogContent>
+									<AlertDialogHeader>
+										<AlertDialogMedia className="bg-destructive/10 text-destructive">
+											<TriangleAlert className="h-5 w-5" />
+										</AlertDialogMedia>
+										<AlertDialogTitle>Xóa nhiều đơn hàng</AlertDialogTitle>
+										<AlertDialogDescription>
+											Bạn sắp xóa {selectedOrders.length} đơn hàng đang chọn.
+											Hành động này không thể hoàn tác.
+										</AlertDialogDescription>
+									</AlertDialogHeader>
+									{selectedOrders.length > 0 && (
+										<div className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-muted/40 p-3 text-sm">
+											{selectedOrders.map((order) => (
+												<div
+													key={order._id}
+													className="flex items-center justify-between gap-3"
+												>
+													<span className="font-mono text-xs">
+														{order.orderNumber}
+													</span>
+													<span className="truncate text-muted-foreground">
+														{order.customer?.name || "-"}
+													</span>
+												</div>
+											))}
+										</div>
+									)}
+									<AlertDialogFooter>
+										<AlertDialogCancel>Hủy</AlertDialogCancel>
+										<AlertDialogAction
+											className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+											onClick={handleBulkDelete}
+										>
+											Xóa các đơn đã chọn
+										</AlertDialogAction>
+									</AlertDialogFooter>
+								</AlertDialogContent>
+							</AlertDialog>
 						</div>
 					</div>
 				</CardHeader>
@@ -817,6 +969,16 @@ function SalesOrdersPage() {
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead className="w-12 text-center">
+										<Checkbox
+											checked={allVisibleOrdersSelected}
+											onCheckedChange={(checked) =>
+												toggleSelectAllOrders(checked === true)
+											}
+											disabled={visibleOrderIds.length === 0}
+											aria-label="Chọn tất cả đơn hàng hiển thị"
+										/>
+									</TableHead>
 									<TableHead>Số đơn</TableHead>
 									<TableHead>Khách hàng</TableHead>
 									<TableHead>Nhân viên</TableHead>
@@ -830,6 +992,15 @@ function SalesOrdersPage() {
 							<TableBody>
 								{filteredOrders?.map((order) => (
 									<TableRow key={order._id}>
+										<TableCell className="text-center">
+											<Checkbox
+												checked={selectedOrderIds.includes(order._id)}
+												onCheckedChange={(checked) =>
+													toggleOrderSelection(order._id, checked === true)
+												}
+												aria-label={`Chọn đơn ${order.orderNumber}`}
+											/>
+										</TableCell>
 										<TableCell className="font-mono">
 											{order.orderNumber}
 										</TableCell>
@@ -862,25 +1033,14 @@ function SalesOrdersPage() {
 												<Eye className="h-4 w-4" />
 											</Button>
 											{order.status === "draft" && (
-												<>
-													<Button
-														variant="ghost"
-														size="icon"
-														title="Xác nhận đơn"
-														onClick={() =>
-															openStatusDialog(order._id, "pending")
-														}
-													>
-														<CheckCircle className="h-4 w-4 text-green-500" />
-													</Button>
-													<Button
-														variant="ghost"
-														size="icon"
-														onClick={() => handleDelete(order._id)}
-													>
-														<Trash2 className="h-4 w-4 text-destructive" />
-													</Button>
-												</>
+												<Button
+													variant="ghost"
+													size="icon"
+													title="Xác nhận đơn"
+													onClick={() => openStatusDialog(order._id, "pending")}
+												>
+													<CheckCircle className="h-4 w-4 text-green-500" />
+												</Button>
 											)}
 											{order.status === "pending" && (
 												<>
@@ -918,6 +1078,14 @@ function SalesOrdersPage() {
 													<CheckCircle className="h-4 w-4 text-green-600" />
 												</Button>
 											)}
+											<Button
+												variant="ghost"
+												size="icon"
+												title="Xóa đơn"
+												onClick={() => handleDelete(order._id)}
+											>
+												<Trash2 className="h-4 w-4 text-destructive" />
+											</Button>
 										</TableCell>
 									</TableRow>
 								))}
@@ -1085,7 +1253,8 @@ function SalesOrdersPage() {
 
 							<div>
 								<p className="mb-3 font-medium text-sm">Lịch sử chỉnh sửa</p>
-								{orderDetails.editHistory && orderDetails.editHistory.length > 0 ? (
+								{orderDetails.editHistory &&
+								orderDetails.editHistory.length > 0 ? (
 									<div className="space-y-3">
 										{[...orderDetails.editHistory]
 											.sort((left, right) => right.editedAt - left.editedAt)
@@ -1097,7 +1266,9 @@ function SalesOrdersPage() {
 													<div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
 														<div className="flex items-center gap-2">
 															<Badge variant="secondary">Người sửa</Badge>
-															<div className="font-medium text-sm">{entry.editedBy}</div>
+															<div className="font-medium text-sm">
+																{entry.editedBy}
+															</div>
 														</div>
 														<div className="text-muted-foreground text-xs">
 															{formatDateTime(entry.editedAt)}
@@ -1113,8 +1284,8 @@ function SalesOrdersPage() {
 																	{getEditFieldLabel(change.field)}
 																</Badge>
 																<div className="mt-3 grid gap-2 sm:grid-cols-2">
-																	<div className="rounded-md border border-dashed border-muted-foreground/30 bg-background p-3">
-																		<div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+																	<div className="rounded-md border border-muted-foreground/30 border-dashed bg-background p-3">
+																		<div className="text-[11px] text-muted-foreground uppercase tracking-wide">
 																			Từ
 																		</div>
 																		<div className="mt-1 whitespace-pre-wrap break-words text-xs">
@@ -1122,7 +1293,7 @@ function SalesOrdersPage() {
 																		</div>
 																	</div>
 																	<div className="rounded-md border border-primary/20 bg-primary/5 p-3">
-																		<div className="text-[11px] uppercase tracking-wide text-primary">
+																		<div className="text-[11px] text-primary uppercase tracking-wide">
 																			Thành
 																		</div>
 																		<div className="mt-1 whitespace-pre-wrap break-words text-xs">
@@ -1137,7 +1308,9 @@ function SalesOrdersPage() {
 											))}
 									</div>
 								) : (
-									<p className="text-muted-foreground text-sm">Chưa có lịch sử chỉnh sửa.</p>
+									<p className="text-muted-foreground text-sm">
+										Chưa có lịch sử chỉnh sửa.
+									</p>
 								)}
 							</div>
 						</div>

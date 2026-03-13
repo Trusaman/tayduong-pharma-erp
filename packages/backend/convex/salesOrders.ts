@@ -46,7 +46,8 @@ async function prepareSalesOrderItems(
 
 		const baseUnitPrice = item.unitPrice;
 		const discountedUnitPrice = baseUnitPrice * (1 - discountPercent / 100);
-		const discountAmount = item.quantity * (baseUnitPrice - discountedUnitPrice);
+		const discountAmount =
+			item.quantity * (baseUnitPrice - discountedUnitPrice);
 		const appliedDiscountBreakdown = allocateDiscountBreakdown(
 			matched,
 			discountPercent,
@@ -104,7 +105,9 @@ function formatSalesOrderItemsSummary(
 	return items
 		.map((item) => {
 			const discountLabel =
-				item.discountPercent !== undefined ? ` | CK ${item.discountPercent}%` : "";
+				item.discountPercent !== undefined
+					? ` | CK ${item.discountPercent}%`
+					: "";
 			return `${item.productLabel} | SL ${item.quantity} | Gia ${item.unitPrice}${discountLabel}`;
 		})
 		.join("\n");
@@ -142,7 +145,9 @@ function areSalesOrderItemsEquivalent(
 		)
 		.sort();
 
-	return normalizeExisting.every((item, index) => item === normalizeNext[index]);
+	return normalizeExisting.every(
+		(item, index) => item === normalizeNext[index],
+	);
 }
 
 // Generate order number
@@ -380,9 +385,15 @@ export const update = mutation({
 		const salesmen = await ctx.db.query("salesmen").collect();
 		const products = await ctx.db.query("products").collect();
 
-		const customerNameById = new Map(customers.map((item) => [item._id, item.name]));
-		const salesmanNameById = new Map(salesmen.map((item) => [item._id, item.name]));
-		const productNameById = new Map(products.map((item) => [item._id, item.name]));
+		const customerNameById = new Map(
+			customers.map((item) => [item._id, item.name]),
+		);
+		const salesmanNameById = new Map(
+			salesmen.map((item) => [item._id, item.name]),
+		);
+		const productNameById = new Map(
+			products.map((item) => [item._id, item.name]),
+		);
 
 		const changes: Array<{
 			field: string;
@@ -403,7 +414,10 @@ export const update = mutation({
 			const isSameHeader =
 				order.customerId === args.customerId &&
 				order.salesmanId === args.salesmanId;
-			const isSameItems = areSalesOrderItemsEquivalent(existingItems, args.items);
+			const isSameItems = areSalesOrderItemsEquivalent(
+				existingItems,
+				args.items,
+			);
 
 			if (!isSameHeader || !isSameItems) {
 				throw new Error(
@@ -476,13 +490,13 @@ export const update = mutation({
 		const nextEditHistory =
 			changes.length > 0
 				? [
-					...(order.editHistory ?? []),
-					{
-						editedAt: now,
-						editedBy: editorName,
-						changes,
-					},
-				]
+						...(order.editHistory ?? []),
+						{
+							editedAt: now,
+							editedBy: editorName,
+							changes,
+						},
+					]
 				: order.editHistory;
 
 		await ctx.db.patch(args.id, {
@@ -647,18 +661,23 @@ export const remove = mutation({
 		const order = await ctx.db.get(args.id);
 		if (!order) throw new Error("Sales order not found");
 
-		if (order.status !== "draft") {
-			throw new Error("Can only delete draft orders");
-		}
-
 		// Delete items
 		const items = await ctx.db
 			.query("salesOrderItems")
 			.withIndex("by_salesOrder", (q) => q.eq("salesOrderId", args.id))
 			.collect();
 
+		const statusLogs = await ctx.db
+			.query("salesOrderStatusLogs")
+			.withIndex("by_salesOrder", (q) => q.eq("salesOrderId", args.id))
+			.collect();
+
 		for (const item of items) {
 			await ctx.db.delete(item._id);
+		}
+
+		for (const log of statusLogs) {
+			await ctx.db.delete(log._id);
 		}
 
 		await ctx.db.delete(args.id);
