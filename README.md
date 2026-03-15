@@ -62,5 +62,45 @@ tayduong-pharma-erp/
 - `pnpm run build`: Build all applications
 - `pnpm run dev:web`: Start only the web application
 - `pnpm run dev:setup`: Setup and configure your Convex project
+- `pnpm run backup`: Create a full Convex backup (tables + file storage)
+- `pnpm run backup:light`: Create a data-only Convex backup (tables only)
+- `pnpm run backup:restore`: Restore Convex data from backup snapshot
 - `pnpm run check-types`: Check TypeScript types across all apps
 - `pnpm run check`: Run Biome formatting and linting
+
+## Backup
+
+This project includes a built-in backup command for Convex data.
+
+```bash
+pnpm run backup
+```
+
+Backups are exported into `backups/<timestamp>/` at the project root.
+Convex will create a snapshot `.zip` file inside that timestamp folder.
+
+- `backup`: exports tables and file storage
+- `backup:light`: exports tables only (without file storage)
+
+You can forward extra Convex export flags after `--`.
+
+```bash
+pnpm run backup -- --prod
+```
+
+To restore, use Convex import/restore tooling with the exported artifacts.
+
+```bash
+pnpm run backup:restore
+```
+
+`backup:restore` will auto-pick the latest `.zip` snapshot from `backups/`.
+You can specify a snapshot file or timestamp folder explicitly:
+
+```bash
+pnpm run backup:restore -- backups/2026-03-14T16-35-44-064Z
+pnpm run backup:restore -- backups/2026-03-14T16-35-44-064Z/snapshot_xxx.zip --replace
+```
+
+You can also forward Convex import flags after `--` (for example `--replace`, `--prod`, `--yes`, `--env-file`).
+If a flag expects a value, pass the value right after the flag.
