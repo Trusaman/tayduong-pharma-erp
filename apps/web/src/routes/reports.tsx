@@ -7,10 +7,24 @@ import {
 	DollarSign,
 	Download,
 	Package,
+	RefreshCw,
+	Server,
 	ShoppingCart,
 	TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +34,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
 	Select,
 	SelectContent,
@@ -42,8 +57,20 @@ export const Route = createFileRoute("/reports")({
 	component: ReportsPage,
 });
 
+type DeploymentTarget = "development" | "production";
+
+interface MaintenanceActionResponse {
+	message: string;
+	savedInLine?: string;
+}
+
 function ReportsPage() {
 	const [selectedPeriod, setSelectedPeriod] = useState("month");
+	const [maintenanceTarget, setMaintenanceTarget] =
+		useState<DeploymentTarget>("development");
+	const [snapshotPath, setSnapshotPath] = useState("");
+	const [isBackingUp, setIsBackingUp] = useState(false);
+	const [isRestoring, setIsRestoring] = useState(false);
 
 	const stats = useQuery(api.dashboard.getStats);
 	const inventory = useQuery(api.inventory.listWithProducts, {});
@@ -82,6 +109,98 @@ function ReportsPage() {
 			return { label: "< 90 ngày", variant: "outline" as const };
 		}
 		return { label: "OK", variant: "default" as const };
+	};
+
+	const parseMaintenanceResponse = async (
+		response: Response,
+	): Promise<MaintenanceActionResponse> => {
+		const payload = await response.json().catch(() => null);
+
+		if (typeof payload !== "object" || payload === null) {
+			if (!response.ok) {
+				throw new Error("Maintenance request failed.");
+			}
+
+			return { message: "Completed." };
+		}
+
+		const messageValue =
+			"message" in payload
+				? (payload as Record<string, unknown>).message
+				: undefined;
+		const savedInLineValue =
+			"savedInLine" in payload
+				? (payload as Record<string, unknown>).savedInLine
+				: undefined;
+
+		if (typeof messageValue !== "string") {
+			if (!response.ok) {
+				throw new Error("Maintenance request failed.");
+			}
+
+			return { message: "Completed." };
+		}
+
+		if (typeof savedInLineValue === "string") {
+			return { message: messageValue, savedInLine: savedInLineValue };
+		}
+
+		return { message: messageValue };
+	};
+
+	const postMaintenanceAction = async (
+		path: string,
+		payload: { target: DeploymentTarget; snapshotPath?: string },
+	) => {
+		const response = await fetch(path, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(payload),
+		});
+
+		const parsed = await parseMaintenanceResponse(response);
+
+		if (!response.ok) {
+			throw new Error(parsed.message);
+		}
+
+		return parsed;
+	};
+
+	const handleBackup = async () => {
+		setIsBackingUp(true);
+		try {
+			const result = await postMaintenanceAction("/api/system/backup", {
+				target: maintenanceTarget,
+			});
+			const summary = result.savedInLine ? ` ${result.savedInLine}` : "";
+			toast.success(`${result.message}${summary}`);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Backup operation failed.";
+			toast.error(message);
+		} finally {
+			setIsBackingUp(false);
+		}
+	};
+
+	const handleRestore = async () => {
+		setIsRestoring(true);
+		try {
+			const result = await postMaintenanceAction("/api/system/restore", {
+				target: maintenanceTarget,
+				snapshotPath,
+			});
+			toast.success(result.message);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : "Restore operation failed.";
+			toast.error(message);
+		} finally {
+			setIsRestoring(false);
+		}
 	};
 
 	if (stats === undefined) {
@@ -151,6 +270,100 @@ function ReportsPage() {
 					</SelectContent>
 				</Select>
 			</div>
+
+			<Card className="border-teal-200">
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<Server className="h-5 w-5 text-teal-600" />
+						Sao luu va khoi phuc du lieu
+					</CardTitle>
+					<CardDescription>
+						Chay backup va restore tren deployment Development hoac Production.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					<div className="grid gap-3 md:grid-cols-2">
+						<div className="space-y-2">
+							<p className="font-medium text-sm">Deployment</p>
+							<Select
+								value={maintenanceTarget}
+								onValueChange={(value) => {
+									if (value === "development" || value === "production") {
+										setMaintenanceTarget(value);
+									}
+								}}
+							>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="development">Development</SelectItem>
+									<SelectItem value="production">Production</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="space-y-2">
+							<p className="font-medium text-sm">
+								Snapshot cho restore (tuy chon)
+							</p>
+							<Input
+								value={snapshotPath}
+								onChange={(event) => setSnapshotPath(event.target.value)}
+								placeholder="backups/<timestamp>/snapshot.zip"
+							/>
+						</div>
+					</div>
+					<div className="flex flex-wrap gap-3">
+						<Button
+							onClick={handleBackup}
+							disabled={isBackingUp || isRestoring}
+						>
+							{isBackingUp ? (
+								<RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+							) : (
+								<Download className="mr-2 h-4 w-4" />
+							)}
+							{isBackingUp ? "Dang backup..." : "Backup"}
+						</Button>
+
+						<AlertDialog>
+							<AlertDialogTrigger asChild>
+								<Button
+									variant="destructive"
+									disabled={isRestoring || isBackingUp}
+								>
+									{isRestoring ? (
+										<RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<RefreshCw className="mr-2 h-4 w-4" />
+									)}
+									{isRestoring ? "Dang restore..." : "Restore"}
+								</Button>
+							</AlertDialogTrigger>
+							<AlertDialogContent>
+								<AlertDialogHeader>
+									<AlertDialogTitle>Xac nhan restore du lieu</AlertDialogTitle>
+									<AlertDialogDescription>
+										Restore se ghi de du lieu hien tai tren deployment da chon.
+										{maintenanceTarget === "production"
+											? " Ban dang thao tac voi Production."
+											: ""}
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>Huy</AlertDialogCancel>
+									<AlertDialogAction
+										className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+										onClick={handleRestore}
+									>
+										Xac nhan restore
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					</div>
+				</CardContent>
+			</Card>
 
 			{/* Summary Cards */}
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

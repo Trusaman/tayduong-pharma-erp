@@ -23,6 +23,8 @@ import { Route as DiscountCalculationsRouteImport } from './routes/discount-calc
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiSystemRestoreRouteImport } from './routes/api/system/restore'
+import { Route as ApiSystemBackupRouteImport } from './routes/api/system/backup'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const SuppliersRoute = SuppliersRouteImport.update({
@@ -95,6 +97,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSystemRestoreRoute = ApiSystemRestoreRouteImport.update({
+  id: '/api/system/restore',
+  path: '/api/system/restore',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSystemBackupRoute = ApiSystemBackupRouteImport.update({
+  id: '/api/system/backup',
+  path: '/api/system/backup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -117,6 +129,8 @@ export interface FileRoutesByFullPath {
   '/sales-orders': typeof SalesOrdersRoute
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -134,6 +148,8 @@ export interface FileRoutesByTo {
   '/sales-orders': typeof SalesOrdersRoute
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -152,6 +168,8 @@ export interface FileRoutesById {
   '/sales-orders': typeof SalesOrdersRoute
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -171,6 +189,8 @@ export interface FileRouteTypes {
     | '/sales-orders'
     | '/suppliers'
     | '/api/auth/$'
+    | '/api/system/backup'
+    | '/api/system/restore'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -188,6 +208,8 @@ export interface FileRouteTypes {
     | '/sales-orders'
     | '/suppliers'
     | '/api/auth/$'
+    | '/api/system/backup'
+    | '/api/system/restore'
   id:
     | '__root__'
     | '/'
@@ -205,6 +227,8 @@ export interface FileRouteTypes {
     | '/sales-orders'
     | '/suppliers'
     | '/api/auth/$'
+    | '/api/system/backup'
+    | '/api/system/restore'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -223,6 +247,8 @@ export interface RootRouteChildren {
   SalesOrdersRoute: typeof SalesOrdersRoute
   SuppliersRoute: typeof SuppliersRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiSystemBackupRoute: typeof ApiSystemBackupRoute
+  ApiSystemRestoreRoute: typeof ApiSystemRestoreRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -325,6 +351,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/system/restore': {
+      id: '/api/system/restore'
+      path: '/api/system/restore'
+      fullPath: '/api/system/restore'
+      preLoaderRoute: typeof ApiSystemRestoreRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/system/backup': {
+      id: '/api/system/backup'
+      path: '/api/system/backup'
+      fullPath: '/api/system/backup'
+      preLoaderRoute: typeof ApiSystemBackupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -351,6 +391,8 @@ const rootRouteChildren: RootRouteChildren = {
   SalesOrdersRoute: SalesOrdersRoute,
   SuppliersRoute: SuppliersRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiSystemBackupRoute: ApiSystemBackupRoute,
+  ApiSystemRestoreRoute: ApiSystemRestoreRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

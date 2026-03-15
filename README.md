@@ -64,7 +64,9 @@ tayduong-pharma-erp/
 - `pnpm run dev:setup`: Setup and configure your Convex project
 - `pnpm run backup`: Create a full Convex backup (tables + file storage)
 - `pnpm run backup:light`: Create a data-only Convex backup (tables only)
+- `pnpm run backup:prod`: Create a backup from production deployment
 - `pnpm run backup:restore`: Restore Convex data from backup snapshot
+- `pnpm run backup:restore:prod`: Restore backup snapshot to production deployment
 - `pnpm run check-types`: Check TypeScript types across all apps
 - `pnpm run check`: Run Biome formatting and linting
 
