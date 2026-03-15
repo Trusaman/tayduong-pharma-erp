@@ -154,6 +154,20 @@ const snapshotPath = shouldSkipSnapshotResolution
 	? undefined
 	: await resolveSnapshotPath(pathArg);
 
+const importModeFlags = new Set(["--replace", "--append", "--replace-all"]);
+const hasImportMode = passthroughArgs.some((arg) => importModeFlags.has(arg));
+const hasConfirmationBypass =
+	passthroughArgs.includes("--yes") || passthroughArgs.includes("-y");
+const defaultImportArgs = [];
+
+if (!helpRequested && !hasImportMode) {
+	defaultImportArgs.push("--replace");
+
+	if (!hasConfirmationBypass) {
+		defaultImportArgs.push("--yes");
+	}
+}
+
 console.log("Starting Convex restore...");
 if (snapshotPath) {
 	console.log(`Snapshot: ${snapshotPath}`);
@@ -167,14 +181,19 @@ if (shouldSkipSnapshotResolution) {
 	console.log("Mode: restore from provided snapshot path");
 }
 
+if (defaultImportArgs.length > 0) {
+	console.log("Import mode: defaulting to --replace");
+}
+
 const commandArgs = [
 	"--filter",
 	"@tayduong-pharma-erp/backend",
 	"exec",
 	"convex",
 	"import",
-	...(snapshotPath ? [snapshotPath] : []),
+	...defaultImportArgs,
 	...passthroughArgs,
+	...(snapshotPath ? [snapshotPath] : []),
 ];
 
 await new Promise((resolvePromise, rejectPromise) => {
