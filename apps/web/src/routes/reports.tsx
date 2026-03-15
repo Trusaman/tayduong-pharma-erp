@@ -14,17 +14,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +23,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -69,6 +66,8 @@ function ReportsPage() {
 	const [maintenanceTarget, setMaintenanceTarget] =
 		useState<DeploymentTarget>("development");
 	const [snapshotPath, setSnapshotPath] = useState("");
+	const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+	const [restoreConfirmation, setRestoreConfirmation] = useState("");
 	const [isBackingUp, setIsBackingUp] = useState(false);
 	const [isRestoring, setIsRestoring] = useState(false);
 
@@ -186,14 +185,34 @@ function ReportsPage() {
 		}
 	};
 
+	const normalizedSnapshotPath = snapshotPath.trim();
+	const restoreSourceLabel =
+		normalizedSnapshotPath.length > 0
+			? normalizedSnapshotPath
+			: "Ban backup moi nhat trong thu muc backups/";
+	const isProductionRestore = maintenanceTarget === "production";
+	const expectedProductionConfirmation = "RESTORE PRODUCTION";
+	const isRestoreConfirmationValid =
+		!isProductionRestore ||
+		restoreConfirmation.trim() === expectedProductionConfirmation;
+
 	const handleRestore = async () => {
+		if (!isRestoreConfirmationValid) {
+			toast.error(
+				`Nhap chinh xac "${expectedProductionConfirmation}" de restore Production.`,
+			);
+			return;
+		}
+
 		setIsRestoring(true);
 		try {
 			const result = await postMaintenanceAction("/api/system/restore", {
 				target: maintenanceTarget,
-				snapshotPath,
+				snapshotPath: normalizedSnapshotPath,
 			});
 			toast.success(result.message);
+			setRestoreDialogOpen(false);
+			setRestoreConfirmation("");
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "Restore operation failed.";
@@ -326,41 +345,125 @@ function ReportsPage() {
 							{isBackingUp ? "Dang backup..." : "Backup"}
 						</Button>
 
-						<AlertDialog>
-							<AlertDialogTrigger asChild>
-								<Button
-									variant="destructive"
-									disabled={isRestoring || isBackingUp}
-								>
-									{isRestoring ? (
-										<RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-									) : (
-										<RefreshCw className="mr-2 h-4 w-4" />
+						<Dialog
+							open={restoreDialogOpen}
+							onOpenChange={(open) => {
+								if (isRestoring) {
+									return;
+								}
+
+								setRestoreDialogOpen(open);
+								if (!open) {
+									setRestoreConfirmation("");
+								}
+							}}
+						>
+							<Button
+								variant="destructive"
+								disabled={isRestoring || isBackingUp}
+								onClick={() => setRestoreDialogOpen(true)}
+							>
+								{isRestoring ? (
+									<RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<RefreshCw className="mr-2 h-4 w-4" />
+								)}
+								{isRestoring ? "Dang restore..." : "Restore"}
+							</Button>
+							<DialogContent
+								className="sm:max-w-md"
+								onEscapeKeyDown={(event) => {
+									if (isRestoring) {
+										event.preventDefault();
+									}
+								}}
+								onInteractOutside={(event) => {
+									if (isRestoring) {
+										event.preventDefault();
+									}
+								}}
+							>
+								<DialogHeader>
+									<DialogTitle>Restore du lieu</DialogTitle>
+									<DialogDescription>
+										Hanh dong nay se ghi de du lieu hien tai bang snapshot ban
+										chon.
+									</DialogDescription>
+								</DialogHeader>
+								<div className="space-y-4">
+									<div className="grid gap-3 rounded-md border border-border/70 bg-slate-50 p-3">
+										<div className="flex items-center justify-between gap-3">
+											<span className="text-muted-foreground text-xs uppercase tracking-[0.18em]">
+												Deployment
+											</span>
+											<Badge
+												variant={
+													isProductionRestore ? "destructive" : "outline"
+												}
+											>
+												{maintenanceTarget}
+											</Badge>
+										</div>
+										<div className="space-y-1">
+											<span className="text-muted-foreground text-xs uppercase tracking-[0.18em]">
+												Nguon restore
+											</span>
+											<p className="break-all font-medium text-slate-900 text-sm">
+												{restoreSourceLabel}
+											</p>
+										</div>
+									</div>
+
+									{normalizedSnapshotPath.length === 0 && (
+										<p className="text-amber-700 text-xs">
+											Khong nhap snapshot path se tu dong restore ban backup moi
+											nhat.
+										</p>
 									)}
-									{isRestoring ? "Dang restore..." : "Restore"}
-								</Button>
-							</AlertDialogTrigger>
-							<AlertDialogContent>
-								<AlertDialogHeader>
-									<AlertDialogTitle>Xac nhan restore du lieu</AlertDialogTitle>
-									<AlertDialogDescription>
-										Restore se ghi de du lieu hien tai tren deployment da chon.
-										{maintenanceTarget === "production"
-											? " Ban dang thao tac voi Production."
-											: ""}
-									</AlertDialogDescription>
-								</AlertDialogHeader>
-								<AlertDialogFooter>
-									<AlertDialogCancel>Huy</AlertDialogCancel>
-									<AlertDialogAction
-										className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-										onClick={handleRestore}
+
+									{isProductionRestore && (
+										<div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+											<p className="font-medium text-destructive text-sm">
+												Ban dang restore tren Production
+											</p>
+											<p className="text-muted-foreground text-xs">
+												Nhap{" "}
+												<span className="font-semibold text-foreground">
+													{expectedProductionConfirmation}
+												</span>{" "}
+												de mo khoa thao tac nay.
+											</p>
+											<Input
+												value={restoreConfirmation}
+												onChange={(event) =>
+													setRestoreConfirmation(event.target.value)
+												}
+												placeholder={expectedProductionConfirmation}
+												autoCapitalize="off"
+												autoCorrect="off"
+												spellCheck={false}
+											/>
+										</div>
+									)}
+								</div>
+								<DialogFooter>
+									<Button
+										variant="outline"
+										onClick={() => setRestoreDialogOpen(false)}
+										disabled={isRestoring}
 									>
-										Xac nhan restore
-									</AlertDialogAction>
-								</AlertDialogFooter>
-							</AlertDialogContent>
-						</AlertDialog>
+										Huy
+									</Button>
+									<Button
+										variant="destructive"
+										onClick={handleRestore}
+										disabled={isRestoring || !isRestoreConfirmationValid}
+									>
+										{isRestoring ? "Dang restore..." : "Xac nhan restore"}
+									</Button>
+								</DialogFooter>
+							</DialogContent>
+						</Dialog>
 					</div>
 				</CardContent>
 			</Card>
