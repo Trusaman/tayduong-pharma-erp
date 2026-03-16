@@ -4,6 +4,7 @@ import type {
 	Doc,
 	Id,
 } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
+import { env } from "@tayduong-pharma-erp/env/web";
 import { useMutation, useQuery } from "convex/react";
 import {
 	Download,
@@ -239,6 +240,21 @@ const sanitizeBankAccounts = (bankAccounts: BankAccountForm[]) => {
 		: undefined;
 };
 
+const getStorageFallbackUrl = (storageId?: Id<"_storage">) => {
+	if (!storageId) return null;
+	const baseUrl = env.VITE_CONVEX_SITE_URL?.replace(/\/$/, "");
+	if (!baseUrl) return null;
+	return `${baseUrl}/api/storage/${storageId}`;
+};
+
+const getPortraitImageUrl = (employee: EmployeeListItem) =>
+	employee.portraitImageUrl ??
+	getStorageFallbackUrl(employee.portraitImage?.storageId);
+
+const getIdentityCardImageUrl = (employee: EmployeeListItem) =>
+	employee.identityCardImageUrl ??
+	getStorageFallbackUrl(employee.identityCardImage?.storageId);
+
 function EmployeesPage() {
 	const [search, setSearch] = useState("");
 	const [statusFilter, setStatusFilter] = useState<"all" | TrackingStatus>(
@@ -294,10 +310,13 @@ function EmployeesPage() {
 		return matchesSearch && matchesStatus && matchesPosition;
 	});
 	const previewPortraitImage = previewEmployee?.portraitImage;
-	const previewPortraitImageUrl = previewEmployee?.portraitImageUrl ?? null;
+	const previewPortraitImageUrl = previewEmployee
+		? getPortraitImageUrl(previewEmployee)
+		: null;
 	const previewIdentityCardImage = previewEmployee?.identityCardImage;
-	const previewIdentityCardImageUrl =
-		previewEmployee?.identityCardImageUrl ?? null;
+	const previewIdentityCardImageUrl = previewEmployee
+		? getIdentityCardImageUrl(previewEmployee)
+		: null;
 
 	const formatDate = (ts: number) => new Date(ts).toLocaleDateString("vi-VN");
 
@@ -556,8 +575,8 @@ function EmployeesPage() {
 			resignationDate: toDateInputValue(emp.resignationDate),
 			notes: emp.notes || "",
 		});
-		setPortraitPreviewUrl(emp.portraitImageUrl ?? "");
-		setIdentityCardPreviewUrl(emp.identityCardImageUrl ?? "");
+		setPortraitPreviewUrl(getPortraitImageUrl(emp) ?? "");
+		setIdentityCardPreviewUrl(getIdentityCardImageUrl(emp) ?? "");
 		setPendingPortraitFile(null);
 		setPendingIdentityCardFile(null);
 		setRemovePortraitImage(false);
@@ -765,13 +784,13 @@ function EmployeesPage() {
 												: ""
 										}
 									>
-										<TableCell>
-											{emp.portraitImageUrl ? (
-												<img
-													src={emp.portraitImageUrl}
-													alt={`Ảnh ${emp.name}`}
-													className="h-12 w-12 rounded-md object-cover ring-1 ring-border"
-												/>
+									<TableCell>
+										{getPortraitImageUrl(emp) ? (
+											<img
+												src={getPortraitImageUrl(emp) ?? ""}
+												alt={`Ảnh ${emp.name}`}
+												className="h-12 w-12 rounded-md object-cover ring-1 ring-border"
+											/>
 											) : (
 												<div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted text-muted-foreground text-xs">
 													Chưa có

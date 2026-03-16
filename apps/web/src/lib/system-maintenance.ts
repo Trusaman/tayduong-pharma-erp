@@ -48,8 +48,13 @@ const findProjectRoot = () => {
 	throw new Error("Không thể xác định thư mục gốc của dự án.");
 };
 
-const projectRoot = findProjectRoot();
-const backupsRoot = resolve(projectRoot, "backups");
+const getProjectPaths = () => {
+	const projectRoot = findProjectRoot();
+	return {
+		projectRoot,
+		backupsRoot: resolve(projectRoot, "backups"),
+	};
+};
 
 const ensureSuccess = (code: number | null, output: string, action: string) => {
 	if (code === 0) {
@@ -108,6 +113,7 @@ const executeCommand = async (
 	launcher: CommandLauncher,
 	args: string[],
 	actionLabel: string,
+	projectRoot: string,
 ): Promise<CommandResult> => {
 	const combinedOutput: string[] = [];
 
@@ -147,12 +153,13 @@ const executeCommand = async (
 const runPnpmCommand = async (
 	args: string[],
 	actionLabel: string,
+	projectRoot: string,
 ): Promise<CommandResult> => {
 	let lastError: Error | null = null;
 
 	for (const launcher of getCommandLaunchers()) {
 		try {
-			return await executeCommand(launcher, args, actionLabel);
+			return await executeCommand(launcher, args, actionLabel, projectRoot);
 		} catch (error) {
 			if (
 				error instanceof Error &&
@@ -177,8 +184,9 @@ const withTargetArgs = (target: DeploymentTarget): string[] =>
 	target === "production" ? ["--prod"] : [];
 
 export const runBackup = async (target: DeploymentTarget) => {
+	const { projectRoot } = getProjectPaths();
 	const commandArgs = ["run", "backup", "--", ...withTargetArgs(target)];
-	const { output } = await runPnpmCommand(commandArgs, "Backup");
+	const { output } = await runPnpmCommand(commandArgs, "Backup", projectRoot);
 	const savedInLine = output
 		.split("\n")
 		.find((line) => line.includes("Saved in:"))
@@ -194,6 +202,7 @@ export const runRestore = async (
 	target: DeploymentTarget,
 	snapshotPath?: string,
 ) => {
+	const { projectRoot } = getProjectPaths();
 	const commandArgs = ["run", "backup:restore", "--"];
 
 	if (snapshotPath && snapshotPath.trim().length > 0) {
@@ -202,7 +211,7 @@ export const runRestore = async (
 
 	commandArgs.push(...withTargetArgs(target));
 
-	const { output } = await runPnpmCommand(commandArgs, "Restore");
+	const { output } = await runPnpmCommand(commandArgs, "Restore", projectRoot);
 
 	return { output };
 };
@@ -210,6 +219,13 @@ export const runRestore = async (
 export const listBackupSnapshots = async (
 	limit = 20,
 ): Promise<BackupSnapshot[]> => {
+	let backupsRoot: string;
+	try {
+		backupsRoot = getProjectPaths().backupsRoot;
+	} catch {
+		return [];
+	}
+
 	try {
 		const entries = await readdir(backupsRoot, { withFileTypes: true });
 		const directories = entries

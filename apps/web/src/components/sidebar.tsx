@@ -36,6 +36,8 @@ const navigation = [
 	{ name: "Báo cáo", href: "/reports", icon: FileBarChart },
 ];
 
+const companyLogoSrc = encodeURI("/image/Logo Tây Dương tách nền.png");
+
 export default function Sidebar() {
 	const [collapsed, setCollapsed] = useState(false);
 	const router = useRouterState();
@@ -52,8 +54,11 @@ export default function Sidebar() {
 			<div className="flex h-16 items-center border-b bg-gradient-to-r from-teal-600 to-cyan-600 px-3">
 				<Link to="/dashboard" className="flex items-center gap-2 font-semibold">
 					<img
-						src="/image/Logo Tây Dương tách nền.png"
+						src={companyLogoSrc}
 						alt="Tây Dương Logo"
+						onError={(event) => {
+							event.currentTarget.style.display = "none";
+						}}
 						className={cn(
 							"transition-all duration-300",
 							collapsed ? "h-10 w-10" : "h-10 w-auto",
