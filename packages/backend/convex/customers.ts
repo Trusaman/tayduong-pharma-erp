@@ -1,6 +1,40 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
+const customerPayloadValidator = {
+	name: v.string(),
+	code: v.string(),
+	contactPerson: v.optional(v.string()),
+	email: v.optional(v.string()),
+	phone: v.optional(v.string()),
+	address: v.optional(v.string()),
+	taxId: v.optional(v.string()),
+	province: v.optional(v.string()),
+	billingAddress: v.optional(v.string()),
+	shippingAddress: v.optional(v.string()),
+	companyDirector: v.optional(v.string()),
+	paymentResponsibleName: v.optional(v.string()),
+	orderResponsibleName: v.optional(v.string()),
+	employeeCode: v.optional(v.string()),
+	territory: v.optional(v.string()),
+	biddingContactName: v.optional(v.string()),
+	biddingContactPhone: v.optional(v.string()),
+	biddingContactNotes: v.optional(v.string()),
+	paymentContactName: v.optional(v.string()),
+	paymentContactPhone: v.optional(v.string()),
+	paymentContactNotes: v.optional(v.string()),
+	receivingContactName: v.optional(v.string()),
+	receivingContactPhone: v.optional(v.string()),
+	receivingContactNotes: v.optional(v.string()),
+	otherContactName: v.optional(v.string()),
+	otherContactPhone: v.optional(v.string()),
+	otherContactNotes: v.optional(v.string()),
+	notes: v.optional(v.string()),
+	isActive: v.optional(v.boolean()),
+} as const;
+
+const MAX_BULK_CUSTOMERS = 500;
+
 export const list = query({
 	args: { activeOnly: v.optional(v.boolean()) },
 	handler: async (ctx, args) => {
@@ -33,37 +67,7 @@ export const getByCode = query({
 });
 
 export const create = mutation({
-	args: {
-		name: v.string(),
-		code: v.string(),
-		contactPerson: v.optional(v.string()),
-		email: v.optional(v.string()),
-		phone: v.optional(v.string()),
-		address: v.optional(v.string()),
-		taxId: v.optional(v.string()),
-		province: v.optional(v.string()),
-		billingAddress: v.optional(v.string()),
-		shippingAddress: v.optional(v.string()),
-		companyDirector: v.optional(v.string()),
-		paymentResponsibleName: v.optional(v.string()),
-		orderResponsibleName: v.optional(v.string()),
-		employeeCode: v.optional(v.string()),
-		territory: v.optional(v.string()),
-		biddingContactName: v.optional(v.string()),
-		biddingContactPhone: v.optional(v.string()),
-		biddingContactNotes: v.optional(v.string()),
-		paymentContactName: v.optional(v.string()),
-		paymentContactPhone: v.optional(v.string()),
-		paymentContactNotes: v.optional(v.string()),
-		receivingContactName: v.optional(v.string()),
-		receivingContactPhone: v.optional(v.string()),
-		receivingContactNotes: v.optional(v.string()),
-		otherContactName: v.optional(v.string()),
-		otherContactPhone: v.optional(v.string()),
-		otherContactNotes: v.optional(v.string()),
-		notes: v.optional(v.string()),
-		isActive: v.optional(v.boolean()),
-	},
+	args: customerPayloadValidator,
 	handler: async (ctx, args) => {
 		const existing = await ctx.db
 			.query("customers")
@@ -108,6 +112,67 @@ export const create = mutation({
 			createdAt: now,
 			updatedAt: now,
 		});
+	},
+});
+
+export const createMany = mutation({
+	args: {
+		rows: v.array(v.object(customerPayloadValidator)),
+	},
+	handler: async (ctx, args) => {
+		if (args.rows.length === 0) {
+			throw new Error("Không có dữ liệu để import");
+		}
+		if (args.rows.length > MAX_BULK_CUSTOMERS) {
+			throw new Error(`Chỉ có thể import tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`);
+		}
+
+		const normalizedRows = args.rows.map((row) => ({
+			...row,
+			code: row.code.trim(),
+			name: row.name.trim(),
+		}));
+
+		const invalidRows = normalizedRows.filter((row) => !row.code || !row.name);
+		if (invalidRows.length > 0) {
+			throw new Error("Dữ liệu import phải có Mã khách hàng và Tên khách hàng");
+		}
+
+		const duplicateInFile = normalizedRows.find(
+			(row, index) =>
+				normalizedRows.findIndex((item) => item.code === row.code) !== index,
+		);
+		if (duplicateInFile) {
+			throw new Error(`Mã khách hàng bị trùng trong file import: ${duplicateInFile.code}`);
+		}
+
+		for (const row of normalizedRows) {
+			const existing = await ctx.db
+				.query("customers")
+				.withIndex("by_code", (q) => q.eq("code", row.code))
+				.first();
+
+			if (existing) {
+				throw new Error(`Mã khách hàng đã tồn tại: ${row.code}`);
+			}
+		}
+
+		const now = Date.now();
+		const insertedIds = [];
+		for (const row of normalizedRows) {
+			const insertedId = await ctx.db.insert("customers", {
+				...row,
+				isActive: row.isActive ?? true,
+				createdAt: now,
+				updatedAt: now,
+			});
+			insertedIds.push(insertedId);
+		}
+
+		return {
+			count: insertedIds.length,
+			insertedIds,
+		};
 	},
 });
 
@@ -171,6 +236,11 @@ export const update = mutation({
 export const remove = mutation({
 	args: { id: v.id("customers") },
 	handler: async (ctx, args) => {
+		const customer = await ctx.db.get(args.id);
+		if (!customer) {
+			throw new Error("Customer not found");
+		}
+
 		const orders = await ctx.db
 			.query("salesOrders")
 			.withIndex("by_customer", (q) => q.eq("customerId", args.id))
@@ -180,7 +250,64 @@ export const remove = mutation({
 			throw new Error("Cannot delete customer that has sales orders");
 		}
 
+		const discountRule = await ctx.db
+			.query("discountRules")
+			.withIndex("by_customer", (q) => q.eq("customerId", args.id))
+			.first();
+
+		if (discountRule) {
+			throw new Error("Không thể xóa khách hàng đang được dùng trong bảng chiết khấu");
+		}
+
 		await ctx.db.delete(args.id);
 		return { success: true };
+	},
+});
+
+export const removeMany = mutation({
+	args: { ids: v.array(v.id("customers")) },
+	handler: async (ctx, args) => {
+		if (args.ids.length === 0) {
+			throw new Error("Không có khách hàng để xóa");
+		}
+		if (args.ids.length > MAX_BULK_CUSTOMERS) {
+			throw new Error(`Chỉ có thể xóa tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`);
+		}
+
+		const uniqueIds = [...new Set(args.ids)];
+		for (const customerId of uniqueIds) {
+			const customer = await ctx.db.get(customerId);
+			if (!customer) {
+				throw new Error("Customer not found");
+			}
+
+			const orders = await ctx.db
+				.query("salesOrders")
+				.withIndex("by_customer", (q) => q.eq("customerId", customerId))
+				.first();
+
+			if (orders) {
+				throw new Error(
+					`Không thể xóa khách hàng ${customer?.code ?? ""} vì đã có đơn hàng`,
+				);
+			}
+
+			const discountRule = await ctx.db
+				.query("discountRules")
+				.withIndex("by_customer", (q) => q.eq("customerId", customerId))
+				.first();
+
+			if (discountRule) {
+				throw new Error(
+					`Không thể xóa khách hàng ${customer.code} vì đang được dùng trong bảng chiết khấu`,
+				);
+			}
+		}
+
+		for (const customerId of uniqueIds) {
+			await ctx.db.delete(customerId);
+		}
+
+		return { success: true, deletedCount: uniqueIds.length };
 	},
 });

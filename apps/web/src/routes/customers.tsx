@@ -2,12 +2,33 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import type { Doc, Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
-import { Pencil, Plus, Search, Trash2, UserCircle } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import {
+	Download,
+	Pencil,
+	Plus,
+	Search,
+	Trash2,
+	TriangleAlert,
+	Upload,
+	UserCircle,
+} from "lucide-react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -112,6 +133,89 @@ function formatOptionalString(value: string) {
 	return trimmed ? trimmed : undefined;
 }
 
+const customerWorkbookColumns = {
+	code: "Mã khách hàng",
+	name: "Tên khách hàng",
+	contactPerson: "Người phụ trách",
+	phone: "Điện thoại",
+	email: "Email",
+	address: "Địa chỉ",
+	province: "Tỉnh",
+	territory: "Địa bàn",
+	taxId: "Mã số thuế",
+	billingAddress: "Địa chỉ hóa đơn",
+	shippingAddress: "Địa chỉ giao hàng",
+	companyDirector: "Giám đốc công ty",
+	paymentResponsibleName: "Người phụ trách thanh toán",
+	orderResponsibleName: "Người phụ trách nhận đơn",
+	employeeCode: "Mã nhân viên phụ trách",
+	biddingContactName: "Liên hệ phụ trách thầu",
+	biddingContactPhone: "SĐT phụ trách thầu",
+	biddingContactNotes: "Ghi chú phụ trách thầu",
+	paymentContactName: "Liên hệ phụ trách thanh toán",
+	paymentContactPhone: "SĐT phụ trách thanh toán",
+	paymentContactNotes: "Ghi chú phụ trách thanh toán",
+	receivingContactName: "Liên hệ phụ trách nhận hàng",
+	receivingContactPhone: "SĐT phụ trách nhận hàng",
+	receivingContactNotes: "Ghi chú phụ trách nhận hàng",
+	otherContactName: "Liên hệ khác",
+	otherContactPhone: "SĐT liên hệ khác",
+	otherContactNotes: "Ghi chú liên hệ khác",
+	notes: "Ghi chú",
+	isActive: "Trạng thái",
+} as const;
+
+const customerWorkbookHeaderOrder = [
+	customerWorkbookColumns.code,
+	customerWorkbookColumns.name,
+	customerWorkbookColumns.contactPerson,
+	customerWorkbookColumns.phone,
+	customerWorkbookColumns.email,
+	customerWorkbookColumns.address,
+	customerWorkbookColumns.province,
+	customerWorkbookColumns.territory,
+	customerWorkbookColumns.taxId,
+	customerWorkbookColumns.billingAddress,
+	customerWorkbookColumns.shippingAddress,
+	customerWorkbookColumns.companyDirector,
+	customerWorkbookColumns.paymentResponsibleName,
+	customerWorkbookColumns.orderResponsibleName,
+	customerWorkbookColumns.employeeCode,
+	customerWorkbookColumns.biddingContactName,
+	customerWorkbookColumns.biddingContactPhone,
+	customerWorkbookColumns.biddingContactNotes,
+	customerWorkbookColumns.paymentContactName,
+	customerWorkbookColumns.paymentContactPhone,
+	customerWorkbookColumns.paymentContactNotes,
+	customerWorkbookColumns.receivingContactName,
+	customerWorkbookColumns.receivingContactPhone,
+	customerWorkbookColumns.receivingContactNotes,
+	customerWorkbookColumns.otherContactName,
+	customerWorkbookColumns.otherContactPhone,
+	customerWorkbookColumns.otherContactNotes,
+	customerWorkbookColumns.notes,
+	customerWorkbookColumns.isActive,
+] as const;
+
+function toCellString(value: unknown) {
+	if (value === null || value === undefined) return "";
+	if (typeof value === "number") return String(value);
+	if (typeof value === "string") return value.trim();
+	return String(value).trim();
+}
+
+function parseActiveStatus(value: string) {
+	const normalized = value.trim().toLowerCase();
+	if (!normalized) return true;
+	if (["hoạt động", "hoat dong", "active", "1", "true", "yes"].includes(normalized)) {
+		return true;
+	}
+	if (["không hoạt động", "khong hoat dong", "inactive", "0", "false", "no"].includes(normalized)) {
+		return false;
+	}
+	throw new Error(`Giá trị trạng thái không hợp lệ: ${value}`);
+}
+
 function getPrimaryContactNameFromValues(values: {
 	orderResponsibleName?: string;
 	paymentResponsibleName?: string;
@@ -190,22 +294,91 @@ function FormRow({
 
 function CustomersPage() {
 	const [search, setSearch] = useState("");
+	const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+	const [provinceFilter, setProvinceFilter] = useState("all");
+	const [territoryFilter, setTerritoryFilter] = useState("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editingId, setEditingId] = useState<Id<"customers"> | null>(null);
 	const [form, setForm] = useState<CustomerForm>(initialForm);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 	const [deletingId, setDeletingId] = useState<Id<"customers"> | null>(null);
+	const [selectedCustomerIds, setSelectedCustomerIds] = useState<Id<"customers">[]>([]);
+	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+	const importInputRef = useRef<HTMLInputElement>(null);
 
 	const customers = useQuery(api.customers.list, { activeOnly: false });
 
 	const createCustomer = useMutation(api.customers.create);
+	const createManyCustomers = useMutation(api.customers.createMany);
 	const updateCustomer = useMutation(api.customers.update);
 	const deleteCustomer = useMutation(api.customers.remove);
+	const deleteManyCustomers = useMutation(api.customers.removeMany);
+
+	const provinceOptions = useMemo(() => {
+		if (!customers) return [];
+		return [
+			...new Set(
+				customers
+					.map((customer) => customer.province?.trim())
+					.filter((value): value is string => Boolean(value)),
+			),
+		]
+			.sort((a, b) => a.localeCompare(b, "vi"));
+	}, [customers]);
+
+	const territoryOptions = useMemo(() => {
+		if (!customers) return [];
+		return [
+			...new Set(
+				customers
+					.map((customer) => customer.territory?.trim())
+					.filter((value): value is string => Boolean(value)),
+			),
+		]
+			.sort((a, b) => a.localeCompare(b, "vi"));
+	}, [customers]);
 
 	const filteredCustomers = customers?.filter(
-		(customer) =>
-			customer.name.toLowerCase().includes(search.toLowerCase()) ||
-			customer.code.toLowerCase().includes(search.toLowerCase()),
+		(customer) => {
+			const normalizedSearch = search.trim().toLowerCase();
+			const matchesSearch =
+				!normalizedSearch ||
+				customer.name.toLowerCase().includes(normalizedSearch) ||
+				customer.code.toLowerCase().includes(normalizedSearch) ||
+				(customer.contactPerson ?? "").toLowerCase().includes(normalizedSearch) ||
+				(customer.phone ?? "").toLowerCase().includes(normalizedSearch);
+			const matchesStatus =
+				statusFilter === "all" ||
+				(statusFilter === "active" && customer.isActive) ||
+				(statusFilter === "inactive" && !customer.isActive);
+			const matchesProvince =
+				provinceFilter === "all" ||
+				(customer.province?.trim() ?? "") === provinceFilter;
+			const matchesTerritory =
+				territoryFilter === "all" ||
+				(customer.territory?.trim() ?? "") === territoryFilter;
+
+			return (
+				matchesSearch && matchesStatus && matchesProvince && matchesTerritory
+			);
+		},
+	);
+
+	const filteredCustomerIds = (filteredCustomers ?? []).map((customer) => customer._id);
+	const selectedCustomerIdSet = useMemo(
+		() => new Set(selectedCustomerIds),
+		[selectedCustomerIds],
+	);
+	const selectedInCurrentFilterCount = filteredCustomerIds.filter((id) =>
+		selectedCustomerIdSet.has(id),
+	).length;
+	const isAllCurrentFilteredSelected =
+		filteredCustomerIds.length > 0 &&
+		selectedInCurrentFilterCount === filteredCustomerIds.length;
+
+	const selectableCustomers = customers ?? [];
+	const selectedCustomers = selectableCustomers.filter((customer) =>
+		selectedCustomerIdSet.has(customer._id),
 	);
 
 	const updateField = <K extends keyof CustomerForm>(
@@ -353,6 +526,302 @@ function CustomersPage() {
 			toast.error(
 				error instanceof Error ? error.message : "Không thể xóa khách hàng",
 			);
+		}
+	};
+
+	const toggleSelectCustomer = (id: Id<"customers">, checked: boolean) => {
+		setSelectedCustomerIds((current) => {
+			if (checked) {
+				if (current.includes(id)) return current;
+				return [...current, id];
+			}
+			return current.filter((selectedId) => selectedId !== id);
+		});
+	};
+
+	const toggleSelectAllFiltered = (checked: boolean) => {
+		if (!filteredCustomerIds.length) return;
+		setSelectedCustomerIds((current) => {
+			if (checked) {
+				return [...new Set([...current, ...filteredCustomerIds])];
+			}
+			return current.filter((id) => !filteredCustomerIds.includes(id));
+		});
+	};
+
+	const handleRemoveSelectedCustomers = async () => {
+		if (selectedCustomerIds.length === 0) return;
+
+		try {
+			const result = await deleteManyCustomers({ ids: selectedCustomerIds });
+			toast.success(`Đã xóa ${result.deletedCount} khách hàng`);
+			setSelectedCustomerIds([]);
+			setBulkDeleteDialogOpen(false);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Không thể xóa danh sách khách hàng",
+			);
+		}
+	};
+
+	const handleExportXlsx = async () => {
+		if (!filteredCustomers || filteredCustomers.length === 0) {
+			toast.error("Không có dữ liệu để xuất");
+			return;
+		}
+
+		try {
+			const XLSX = await import("xlsx");
+			const rows = filteredCustomers.map((customer) => ({
+				[customerWorkbookColumns.code]: customer.code,
+				[customerWorkbookColumns.name]: customer.name,
+				[customerWorkbookColumns.contactPerson]: customer.contactPerson ?? "",
+				[customerWorkbookColumns.phone]: customer.phone ?? "",
+				[customerWorkbookColumns.email]: customer.email ?? "",
+				[customerWorkbookColumns.address]: customer.address ?? "",
+				[customerWorkbookColumns.province]: customer.province ?? "",
+				[customerWorkbookColumns.territory]: customer.territory ?? "",
+				[customerWorkbookColumns.taxId]: customer.taxId ?? "",
+				[customerWorkbookColumns.billingAddress]: customer.billingAddress ?? "",
+				[customerWorkbookColumns.shippingAddress]: customer.shippingAddress ?? "",
+				[customerWorkbookColumns.companyDirector]: customer.companyDirector ?? "",
+				[customerWorkbookColumns.paymentResponsibleName]:
+					customer.paymentResponsibleName ?? "",
+				[customerWorkbookColumns.orderResponsibleName]:
+					customer.orderResponsibleName ?? "",
+				[customerWorkbookColumns.employeeCode]: customer.employeeCode ?? "",
+				[customerWorkbookColumns.biddingContactName]:
+					customer.biddingContactName ?? "",
+				[customerWorkbookColumns.biddingContactPhone]:
+					customer.biddingContactPhone ?? "",
+				[customerWorkbookColumns.biddingContactNotes]:
+					customer.biddingContactNotes ?? "",
+				[customerWorkbookColumns.paymentContactName]:
+					customer.paymentContactName ?? "",
+				[customerWorkbookColumns.paymentContactPhone]:
+					customer.paymentContactPhone ?? "",
+				[customerWorkbookColumns.paymentContactNotes]:
+					customer.paymentContactNotes ?? "",
+				[customerWorkbookColumns.receivingContactName]:
+					customer.receivingContactName ?? "",
+				[customerWorkbookColumns.receivingContactPhone]:
+					customer.receivingContactPhone ?? "",
+				[customerWorkbookColumns.receivingContactNotes]:
+					customer.receivingContactNotes ?? "",
+				[customerWorkbookColumns.otherContactName]: customer.otherContactName ?? "",
+				[customerWorkbookColumns.otherContactPhone]: customer.otherContactPhone ?? "",
+				[customerWorkbookColumns.otherContactNotes]: customer.otherContactNotes ?? "",
+				[customerWorkbookColumns.notes]: customer.notes ?? "",
+				[customerWorkbookColumns.isActive]: customer.isActive
+					? "Hoạt động"
+					: "Không hoạt động",
+			}));
+
+			const worksheet = XLSX.utils.json_to_sheet(rows, {
+				header: [...customerWorkbookHeaderOrder],
+			});
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, worksheet, "Khach_hang");
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "danh-sach-khach-hang.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã xuất file XLSX");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể xuất file XLSX",
+			);
+		}
+	};
+
+	const handlePickImportFile = () => {
+		importInputRef.current?.click();
+	};
+
+	const handleImportXlsx = async (event: React.ChangeEvent<HTMLInputElement>) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		try {
+			const XLSX = await import("xlsx");
+			const fileBuffer = await file.arrayBuffer();
+			const workbook = XLSX.read(fileBuffer, { type: "array" });
+			const worksheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+			if (!worksheet) {
+				throw new Error("Không tìm thấy dữ liệu trong file import");
+			}
+
+			const headerRows = XLSX.utils.sheet_to_json<Array<string | number>>(
+				worksheet,
+				{
+					header: 1,
+					defval: "",
+				},
+			);
+			const headerRow = (headerRows[0] ?? []).map((cell) => toCellString(cell));
+			for (const requiredColumn of [
+				customerWorkbookColumns.code,
+				customerWorkbookColumns.name,
+			]) {
+				if (!headerRow.includes(requiredColumn)) {
+					throw new Error(`File import thiếu cột bắt buộc: ${requiredColumn}`);
+				}
+			}
+
+			const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+				worksheet,
+				{ defval: "" },
+			);
+			const rows = rawRows
+				.map((row) => {
+					const rawCode = row[customerWorkbookColumns.code];
+					const rawPhone = row[customerWorkbookColumns.phone];
+					if (typeof rawCode === "number") {
+						throw new Error(
+							`Mã khách hàng phải ở dạng text để giữ nguyên ký tự: ${rawCode}`,
+						);
+					}
+					if (typeof rawPhone === "number") {
+						throw new Error(
+							`Điện thoại phải ở dạng text để giữ nguyên số 0 đầu: ${rawPhone}`,
+						);
+					}
+
+					const orderResponsibleName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.orderResponsibleName]),
+					);
+					const paymentResponsibleName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.paymentResponsibleName]),
+					);
+					const biddingContactName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.biddingContactName]),
+					);
+					const paymentContactName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.paymentContactName]),
+					);
+					const receivingContactName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.receivingContactName]),
+					);
+					const otherContactName = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.otherContactName]),
+					);
+					const inputContactPerson = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.contactPerson]),
+					);
+
+					const biddingContactPhone = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.biddingContactPhone]),
+					);
+					const paymentContactPhone = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.paymentContactPhone]),
+					);
+					const receivingContactPhone = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.receivingContactPhone]),
+					);
+					const otherContactPhone = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.otherContactPhone]),
+					);
+					const inputPhone = formatOptionalString(
+						toCellString(row[customerWorkbookColumns.phone]),
+					);
+
+					const primaryContact =
+						orderResponsibleName ??
+						paymentResponsibleName ??
+						biddingContactName ??
+						paymentContactName ??
+						receivingContactName ??
+						otherContactName ??
+						inputContactPerson;
+
+					const primaryPhone =
+						biddingContactPhone ??
+						paymentContactPhone ??
+						receivingContactPhone ??
+						otherContactPhone ??
+						inputPhone;
+
+					return {
+						code: toCellString(rawCode),
+						name: toCellString(row[customerWorkbookColumns.name]),
+						contactPerson: primaryContact,
+						phone: primaryPhone,
+					email: formatOptionalString(toCellString(row[customerWorkbookColumns.email])),
+					address: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.address]),
+					),
+					province: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.province]),
+					),
+					territory: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.territory]),
+					),
+					taxId: formatOptionalString(toCellString(row[customerWorkbookColumns.taxId])),
+					billingAddress: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.billingAddress]),
+					),
+					shippingAddress: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.shippingAddress]),
+					),
+					companyDirector: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.companyDirector]),
+					),
+					paymentResponsibleName,
+					orderResponsibleName,
+					employeeCode: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.employeeCode]),
+					),
+					biddingContactName,
+					biddingContactPhone,
+					biddingContactNotes: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.biddingContactNotes]),
+					),
+					paymentContactName,
+					paymentContactPhone,
+					paymentContactNotes: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.paymentContactNotes]),
+					),
+					receivingContactName,
+					receivingContactPhone,
+					receivingContactNotes: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.receivingContactNotes]),
+					),
+					otherContactName,
+					otherContactPhone,
+					otherContactNotes: formatOptionalString(
+						toCellString(row[customerWorkbookColumns.otherContactNotes]),
+					),
+					notes: formatOptionalString(toCellString(row[customerWorkbookColumns.notes])),
+					isActive: parseActiveStatus(
+						toCellString(row[customerWorkbookColumns.isActive]),
+					),
+					};
+				})
+				.filter((row) => row.code || row.name);
+
+			if (rows.length === 0) {
+				throw new Error("File import không có dữ liệu hợp lệ");
+			}
+
+			const result = await createManyCustomers({ rows });
+			toast.success(`Đã import ${result.count} khách hàng`);
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Không thể import file XLSX",
+			);
+		} finally {
+			event.target.value = "";
 		}
 	};
 
@@ -579,20 +1048,96 @@ function CustomersPage() {
 
 			<Card>
 				<CardHeader>
-					<div className="flex items-center justify-between">
-						<CardTitle>Danh sách khách hàng</CardTitle>
-						<div className="relative w-64">
-							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-							<Input
-								placeholder="Tìm kiếm khách hàng..."
-								value={search}
-								onChange={(e) => setSearch(e.target.value)}
-								className="pl-8"
-							/>
+					<div className="flex flex-col gap-3">
+						<div className="flex flex-wrap items-center justify-between gap-2">
+							<CardTitle>Danh sách khách hàng</CardTitle>
+							<div className="flex flex-wrap items-center gap-2">
+								<Button variant="outline" onClick={handlePickImportFile}>
+									<Upload className="mr-2 h-4 w-4" />
+									Import XLSX
+								</Button>
+								<Button variant="outline" onClick={handleExportXlsx}>
+									<Download className="mr-2 h-4 w-4" />
+									Export XLSX
+								</Button>
+								<Button
+									variant="destructive"
+									disabled={selectedCustomers.length === 0}
+									onClick={() => setBulkDeleteDialogOpen(true)}
+								>
+									<Trash2 className="mr-2 h-4 w-4" />
+									Xóa đã chọn ({selectedCustomers.length})
+								</Button>
+							</div>
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="relative min-w-[220px] flex-1">
+								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+								<Input
+									placeholder="Tìm kiếm mã, tên, liên hệ, điện thoại..."
+									value={search}
+									onChange={(e) => setSearch(e.target.value)}
+									className="pl-8"
+								/>
+							</div>
+							<Select
+								value={statusFilter}
+								onValueChange={(value) =>
+									setStatusFilter((value as typeof statusFilter) ?? "all")
+								}
+							>
+								<SelectTrigger className="w-[170px]">
+									<SelectValue placeholder="Trạng thái" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">Tất cả trạng thái</SelectItem>
+									<SelectItem value="active">Hoạt động</SelectItem>
+									<SelectItem value="inactive">Không hoạt động</SelectItem>
+								</SelectContent>
+							</Select>
+							<Select
+								value={provinceFilter}
+								onValueChange={(value) => setProvinceFilter(value ?? "all")}
+							>
+								<SelectTrigger className="w-[170px]">
+									<SelectValue placeholder="Tỉnh" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">Tất cả tỉnh</SelectItem>
+									{provinceOptions.map((province) => (
+										<SelectItem key={province} value={province}>
+											{province}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<Select
+								value={territoryFilter}
+								onValueChange={(value) => setTerritoryFilter(value ?? "all")}
+							>
+								<SelectTrigger className="w-[170px]">
+									<SelectValue placeholder="Địa bàn" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">Tất cả địa bàn</SelectItem>
+									{territoryOptions.map((territory) => (
+										<SelectItem key={territory} value={territory}>
+											{territory}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
 						</div>
 					</div>
 				</CardHeader>
 				<CardContent>
+					<input
+						ref={importInputRef}
+						type="file"
+						accept=".xlsx,.xls"
+						className="hidden"
+						onChange={handleImportXlsx}
+					/>
 					{customers === undefined ? (
 						<div className="py-8 text-center text-muted-foreground">
 							Đang tải...
@@ -606,6 +1151,14 @@ function CustomersPage() {
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead className="w-[44px]">
+										<Checkbox
+											checked={isAllCurrentFilteredSelected}
+											onCheckedChange={(checked) =>
+												toggleSelectAllFiltered(Boolean(checked))
+											}
+										/>
+									</TableHead>
 									<TableHead>Mã</TableHead>
 									<TableHead>Tên khách hàng</TableHead>
 									<TableHead>Người phụ trách</TableHead>
@@ -618,6 +1171,14 @@ function CustomersPage() {
 							<TableBody>
 								{filteredCustomers?.map((customer) => (
 									<TableRow key={customer._id}>
+										<TableCell>
+											<Checkbox
+												checked={selectedCustomerIdSet.has(customer._id)}
+												onCheckedChange={(checked) =>
+													toggleSelectCustomer(customer._id, Boolean(checked))
+												}
+											/>
+										</TableCell>
 										<TableCell className="font-mono">{customer.code}</TableCell>
 										<TableCell className="font-medium">{customer.name}</TableCell>
 										<TableCell>{getPrimaryContactName(customer)}</TableCell>
@@ -657,24 +1218,75 @@ function CustomersPage() {
 				</CardContent>
 			</Card>
 
-			<Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Xóa khách hàng</DialogTitle>
-						<DialogDescription>
-							Bạn có chắc muốn xóa khách hàng này? Hành động này không thể hoàn tác.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-							Hủy
-						</Button>
-						<Button variant="destructive" onClick={handleDelete}>
-							Xóa
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-destructive/10 text-destructive">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận xóa khách hàng</AlertDialogTitle>
+						<AlertDialogDescription>
+							Bạn sắp xóa khách hàng này khỏi hệ thống. Hành động không thể hoàn tác.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							onClick={handleDelete}
+						>
+							Xác nhận xóa
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={bulkDeleteDialogOpen}
+				onOpenChange={setBulkDeleteDialogOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-destructive/10 text-destructive">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận xóa nhiều khách hàng</AlertDialogTitle>
+						<AlertDialogDescription>
+							Bạn sắp xóa {selectedCustomers.length} khách hàng đã chọn. Hành động
+							không thể hoàn tác.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					{selectedCustomers.length > 0 && (
+						<div className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-muted/40 p-3 text-sm">
+							{selectedCustomers.slice(0, 8).map((customer) => (
+								<div
+									key={customer._id}
+									className="flex items-center justify-between gap-3"
+								>
+									<span className="font-mono text-xs">{customer.code}</span>
+									<span className="truncate text-muted-foreground">
+										{customer.name}
+									</span>
+								</div>
+							))}
+							{selectedCustomers.length > 8 && (
+								<p className="text-muted-foreground text-xs">
+									+{selectedCustomers.length - 8} khách hàng nữa
+								</p>
+							)}
+						</div>
+					)}
+					<AlertDialogFooter>
+						<AlertDialogCancel>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							onClick={handleRemoveSelectedCustomers}
+						>
+							Xác nhận xóa đã chọn
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }
