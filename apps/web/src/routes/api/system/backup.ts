@@ -21,19 +21,21 @@ export const Route = createFileRoute("/api/system/backup")({
 
 				if (!target) {
 					return toBadRequest(
-						"Invalid target. Expected 'development' or 'production'.",
+						"Deployment không hợp lệ. Chỉ chấp nhận development hoặc production.",
 					);
 				}
 
 				try {
 					const result = await runBackup(target);
 					return Response.json({
-						message: `Backup completed on ${target}.`,
+						message: `Đã sao lưu dữ liệu trên môi trường ${target}.`,
 						savedInLine: result.savedInLine,
 					});
 				} catch (error) {
 					const message =
-						error instanceof Error ? error.message : "Backup command failed.";
+						error instanceof Error
+							? error.message
+							: "Lệnh sao lưu dữ liệu thất bại.";
 					return Response.json({ message }, { status: 500 });
 				}
 			},

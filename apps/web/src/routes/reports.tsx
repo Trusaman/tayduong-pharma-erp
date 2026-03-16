@@ -6,13 +6,14 @@ import {
 	ClipboardList,
 	DollarSign,
 	Download,
+	FolderSync,
 	Package,
 	RefreshCw,
 	Server,
 	ShoppingCart,
 	TrendingUp,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,16 +57,68 @@ export const Route = createFileRoute("/reports")({
 
 type DeploymentTarget = "development" | "production";
 
+interface BackupSnapshotOption {
+	path: string;
+	directory: string;
+	fileName: string;
+}
+
 interface MaintenanceActionResponse {
 	message: string;
 	savedInLine?: string;
 }
+
+const LATEST_SNAPSHOT_VALUE = "__latest__";
+
+const backupTimestampFormatter = new Intl.DateTimeFormat("vi-VN", {
+	day: "2-digit",
+	month: "2-digit",
+	year: "numeric",
+	hour: "2-digit",
+	minute: "2-digit",
+	second: "2-digit",
+});
+
+const formatSnapshotTimestamp = (directory: string) => {
+	const match = directory.match(
+		/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/,
+	);
+
+	if (!match) {
+		return directory;
+	}
+
+	const [, year, month, day, hour, minute, second, millisecond] = match;
+	const date = new Date(
+		Date.UTC(
+			Number(year),
+			Number(month) - 1,
+			Number(day),
+			Number(hour),
+			Number(minute),
+			Number(second),
+			Number(millisecond),
+		),
+	);
+
+	return backupTimestampFormatter.format(date);
+};
+
+const getSnapshotLabel = (snapshot: BackupSnapshotOption) =>
+	`${formatSnapshotTimestamp(snapshot.directory)} - ${snapshot.fileName}`;
 
 function ReportsPage() {
 	const [selectedPeriod, setSelectedPeriod] = useState("month");
 	const [maintenanceTarget, setMaintenanceTarget] =
 		useState<DeploymentTarget>("development");
 	const [snapshotPath, setSnapshotPath] = useState("");
+	const [availableSnapshots, setAvailableSnapshots] = useState<
+		BackupSnapshotOption[]
+	>([]);
+	const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+	const [snapshotLoadError, setSnapshotLoadError] = useState<string | null>(
+		null,
+	);
 	const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
 	const [restoreConfirmation, setRestoreConfirmation] = useState("");
 	const [isBackingUp, setIsBackingUp] = useState(false);
@@ -117,10 +170,10 @@ function ReportsPage() {
 
 		if (typeof payload !== "object" || payload === null) {
 			if (!response.ok) {
-				throw new Error("Maintenance request failed.");
+				throw new Error("Yêu cầu thao tác hệ thống thất bại.");
 			}
 
-			return { message: "Completed." };
+			return { message: "Hoàn tất." };
 		}
 
 		const messageValue =
@@ -134,10 +187,10 @@ function ReportsPage() {
 
 		if (typeof messageValue !== "string") {
 			if (!response.ok) {
-				throw new Error("Maintenance request failed.");
+				throw new Error("Yêu cầu thao tác hệ thống thất bại.");
 			}
 
-			return { message: "Completed." };
+			return { message: "Hoàn tất." };
 		}
 
 		if (typeof savedInLineValue === "string") {
@@ -168,6 +221,60 @@ function ReportsPage() {
 		return parsed;
 	};
 
+	const loadSnapshots = useCallback(async (showToastOnError = false) => {
+		setIsLoadingSnapshots(true);
+		setSnapshotLoadError(null);
+
+		try {
+			const response = await fetch("/api/system/backups");
+			const payload = await response.json().catch(() => null);
+
+			if (!response.ok) {
+				const message =
+					typeof payload === "object" &&
+					payload !== null &&
+					"message" in payload &&
+					typeof (payload as Record<string, unknown>).message === "string"
+						? ((payload as Record<string, unknown>).message as string)
+						: "Không thể tải danh sách bản sao lưu.";
+				throw new Error(message);
+			}
+
+			const snapshots =
+				typeof payload === "object" &&
+				payload !== null &&
+				"snapshots" in payload &&
+				Array.isArray((payload as Record<string, unknown>).snapshots)
+					? ((payload as Record<string, unknown>)
+							.snapshots as BackupSnapshotOption[])
+					: [];
+
+			setAvailableSnapshots(snapshots);
+			setSnapshotPath((currentValue) =>
+				currentValue.length > 0 &&
+				snapshots.every((snapshot) => snapshot.path !== currentValue)
+					? ""
+					: currentValue,
+			);
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: "Không thể tải danh sách bản sao lưu.";
+			setSnapshotLoadError(message);
+
+			if (showToastOnError) {
+				toast.error(message);
+			}
+		} finally {
+			setIsLoadingSnapshots(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		void loadSnapshots();
+	}, [loadSnapshots]);
+
 	const handleBackup = async () => {
 		setIsBackingUp(true);
 		try {
@@ -176,9 +283,10 @@ function ReportsPage() {
 			});
 			const summary = result.savedInLine ? ` ${result.savedInLine}` : "";
 			toast.success(`${result.message}${summary}`);
+			void loadSnapshots();
 		} catch (error) {
 			const message =
-				error instanceof Error ? error.message : "Backup operation failed.";
+				error instanceof Error ? error.message : "Sao lưu dữ liệu thất bại.";
 			toast.error(message);
 		} finally {
 			setIsBackingUp(false);
@@ -186,20 +294,39 @@ function ReportsPage() {
 	};
 
 	const normalizedSnapshotPath = snapshotPath.trim();
+	const selectedSnapshot = availableSnapshots.find(
+		(snapshot) => snapshot.path === normalizedSnapshotPath,
+	);
+	const latestSnapshot = availableSnapshots[0];
 	const restoreSourceLabel =
 		normalizedSnapshotPath.length > 0
-			? normalizedSnapshotPath
-			: "Ban backup moi nhat trong thu muc backups/";
+			? selectedSnapshot
+				? getSnapshotLabel(selectedSnapshot)
+				: normalizedSnapshotPath
+			: latestSnapshot
+				? getSnapshotLabel(latestSnapshot)
+				: "Bản sao lưu mới nhất trong thư mục backups/";
 	const isProductionRestore = maintenanceTarget === "production";
 	const expectedProductionConfirmation = "RESTORE PRODUCTION";
 	const isRestoreConfirmationValid =
 		!isProductionRestore ||
 		restoreConfirmation.trim() === expectedProductionConfirmation;
+	const hasSnapshotsAvailable = availableSnapshots.length > 0;
+	const canStartRestore =
+		hasSnapshotsAvailable &&
+		!isLoadingSnapshots &&
+		!isBackingUp &&
+		!isRestoring;
 
 	const handleRestore = async () => {
+		if (!hasSnapshotsAvailable) {
+			toast.error("Chưa có bản sao lưu nào để phục hồi.");
+			return;
+		}
+
 		if (!isRestoreConfirmationValid) {
 			toast.error(
-				`Nhap chinh xac "${expectedProductionConfirmation}" de restore Production.`,
+				`Nhập chính xác "${expectedProductionConfirmation}" để phục hồi Production.`,
 			);
 			return;
 		}
@@ -215,7 +342,7 @@ function ReportsPage() {
 			setRestoreConfirmation("");
 		} catch (error) {
 			const message =
-				error instanceof Error ? error.message : "Restore operation failed.";
+				error instanceof Error ? error.message : "Phục hồi dữ liệu thất bại.";
 			toast.error(message);
 		} finally {
 			setIsRestoring(false);
@@ -294,10 +421,11 @@ function ReportsPage() {
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2">
 						<Server className="h-5 w-5 text-teal-600" />
-						Sao luu va khoi phuc du lieu
+						Sao lưu và phục hồi dữ liệu
 					</CardTitle>
 					<CardDescription>
-						Chay backup va restore tren deployment Development hoac Production.
+						Chạy sao lưu và phục hồi trên môi trường Development hoặc
+						Production.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -307,7 +435,10 @@ function ReportsPage() {
 							<Select
 								value={maintenanceTarget}
 								onValueChange={(value) => {
-									if (value === "development" || value === "production") {
+									if (
+										typeof value === "string" &&
+										(value === "development" || value === "production")
+									) {
 										setMaintenanceTarget(value);
 									}
 								}}
@@ -322,14 +453,58 @@ function ReportsPage() {
 							</Select>
 						</div>
 						<div className="space-y-2">
-							<p className="font-medium text-sm">
-								Snapshot cho restore (tuy chon)
-							</p>
-							<Input
-								value={snapshotPath}
-								onChange={(event) => setSnapshotPath(event.target.value)}
-								placeholder="backups/<timestamp>/snapshot.zip"
-							/>
+							<div className="flex items-center justify-between gap-3">
+								<p className="font-medium text-sm">Bản sao lưu để phục hồi</p>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => void loadSnapshots(true)}
+									disabled={isLoadingSnapshots || isBackingUp || isRestoring}
+								>
+									{isLoadingSnapshots ? (
+										<RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<FolderSync className="mr-2 h-4 w-4" />
+									)}
+									Làm mới
+								</Button>
+							</div>
+							<Select
+								value={normalizedSnapshotPath || LATEST_SNAPSHOT_VALUE}
+								onValueChange={(value) => {
+									if (typeof value !== "string") {
+										return;
+									}
+
+									setSnapshotPath(value === LATEST_SNAPSHOT_VALUE ? "" : value);
+								}}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder="Chọn bản sao lưu" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value={LATEST_SNAPSHOT_VALUE}>
+										Dùng bản sao lưu mới nhất
+									</SelectItem>
+									{availableSnapshots.map((snapshot) => (
+										<SelectItem key={snapshot.path} value={snapshot.path}>
+											{getSnapshotLabel(snapshot)}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							{snapshotLoadError ? (
+								<p className="text-destructive text-xs">{snapshotLoadError}</p>
+							) : hasSnapshotsAvailable ? (
+								<p className="text-muted-foreground text-xs">
+									Tìm thấy {availableSnapshots.length} bản sao lưu trong thư mục
+									`backups/`.
+								</p>
+							) : (
+								<p className="text-amber-700 text-xs">
+									Chưa có bản sao lưu nào để phục hồi.
+								</p>
+							)}
 						</div>
 					</div>
 					<div className="flex flex-wrap gap-3">
@@ -342,7 +517,7 @@ function ReportsPage() {
 							) : (
 								<Download className="mr-2 h-4 w-4" />
 							)}
-							{isBackingUp ? "Dang backup..." : "Backup"}
+							{isBackingUp ? "Đang sao lưu..." : "Sao lưu"}
 						</Button>
 
 						<Dialog
@@ -360,7 +535,7 @@ function ReportsPage() {
 						>
 							<Button
 								variant="destructive"
-								disabled={isRestoring || isBackingUp}
+								disabled={!canStartRestore}
 								onClick={() => setRestoreDialogOpen(true)}
 							>
 								{isRestoring ? (
@@ -368,33 +543,24 @@ function ReportsPage() {
 								) : (
 									<RefreshCw className="mr-2 h-4 w-4" />
 								)}
-								{isRestoring ? "Dang restore..." : "Restore"}
+								{isRestoring ? "Đang phục hồi..." : "Phục hồi"}
 							</Button>
 							<DialogContent
 								className="sm:max-w-md"
-								onEscapeKeyDown={(event) => {
-									if (isRestoring) {
-										event.preventDefault();
-									}
-								}}
-								onInteractOutside={(event) => {
-									if (isRestoring) {
-										event.preventDefault();
-									}
-								}}
+								showCloseButton={!isRestoring}
 							>
 								<DialogHeader>
-									<DialogTitle>Restore du lieu</DialogTitle>
+									<DialogTitle>Phục hồi dữ liệu</DialogTitle>
 									<DialogDescription>
-										Hanh dong nay se ghi de du lieu hien tai bang snapshot ban
-										chon.
+										Hành động này sẽ ghi đè dữ liệu hiện tại bằng bản sao lưu
+										bạn chọn.
 									</DialogDescription>
 								</DialogHeader>
 								<div className="space-y-4">
 									<div className="grid gap-3 rounded-md border border-border/70 bg-slate-50 p-3">
 										<div className="flex items-center justify-between gap-3">
 											<span className="text-muted-foreground text-xs uppercase tracking-[0.18em]">
-												Deployment
+												Môi trường
 											</span>
 											<Badge
 												variant={
@@ -406,7 +572,7 @@ function ReportsPage() {
 										</div>
 										<div className="space-y-1">
 											<span className="text-muted-foreground text-xs uppercase tracking-[0.18em]">
-												Nguon restore
+												Nguồn phục hồi
 											</span>
 											<p className="break-all font-medium text-slate-900 text-sm">
 												{restoreSourceLabel}
@@ -416,22 +582,22 @@ function ReportsPage() {
 
 									{normalizedSnapshotPath.length === 0 && (
 										<p className="text-amber-700 text-xs">
-											Khong nhap snapshot path se tu dong restore ban backup moi
-											nhat.
+											Nếu không chọn cụ thể, hệ thống sẽ tự dùng bản sao lưu mới
+											nhất.
 										</p>
 									)}
 
 									{isProductionRestore && (
 										<div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
 											<p className="font-medium text-destructive text-sm">
-												Ban dang restore tren Production
+												Bạn đang phục hồi trên Production
 											</p>
 											<p className="text-muted-foreground text-xs">
-												Nhap{" "}
+												Nhập{" "}
 												<span className="font-semibold text-foreground">
 													{expectedProductionConfirmation}
 												</span>{" "}
-												de mo khoa thao tac nay.
+												để mở khóa thao tác này.
 											</p>
 											<Input
 												value={restoreConfirmation}
@@ -452,14 +618,14 @@ function ReportsPage() {
 										onClick={() => setRestoreDialogOpen(false)}
 										disabled={isRestoring}
 									>
-										Huy
+										Hủy
 									</Button>
 									<Button
 										variant="destructive"
 										onClick={handleRestore}
 										disabled={isRestoring || !isRestoreConfirmationValid}
 									>
-										{isRestoring ? "Dang restore..." : "Xac nhan restore"}
+										{isRestoring ? "Đang phục hồi..." : "Xác nhận phục hồi"}
 									</Button>
 								</DialogFooter>
 							</DialogContent>

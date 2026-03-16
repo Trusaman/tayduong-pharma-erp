@@ -1,9 +1,16 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type DeploymentTarget = "development" | "production";
+
+export interface BackupSnapshot {
+	path: string;
+	directory: string;
+	fileName: string;
+}
 
 interface CommandResult {
 	output: string;
@@ -14,10 +21,35 @@ interface CommandLauncher {
 	prefixArgs: string[];
 }
 
-const projectRoot = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	"../../../..",
-);
+const hasProjectRootMarkers = (directory: string) =>
+	existsSync(resolve(directory, "scripts", "backup-convex.mjs")) &&
+	existsSync(resolve(directory, "package.json"));
+
+const findProjectRoot = () => {
+	const searchRoots = [process.cwd(), dirname(fileURLToPath(import.meta.url))];
+
+	for (const root of searchRoots) {
+		let currentDirectory = resolve(root);
+
+		while (true) {
+			if (hasProjectRootMarkers(currentDirectory)) {
+				return currentDirectory;
+			}
+
+			const parentDirectory = dirname(currentDirectory);
+			if (parentDirectory === currentDirectory) {
+				break;
+			}
+
+			currentDirectory = parentDirectory;
+		}
+	}
+
+	throw new Error("Không thể xác định thư mục gốc của dự án.");
+};
+
+const projectRoot = findProjectRoot();
+const backupsRoot = resolve(projectRoot, "backups");
 
 const ensureSuccess = (code: number | null, output: string, action: string) => {
 	if (code === 0) {
@@ -173,4 +205,55 @@ export const runRestore = async (
 	const { output } = await runPnpmCommand(commandArgs, "Restore");
 
 	return { output };
+};
+
+export const listBackupSnapshots = async (
+	limit = 20,
+): Promise<BackupSnapshot[]> => {
+	try {
+		const entries = await readdir(backupsRoot, { withFileTypes: true });
+		const directories = entries
+			.filter((entry) => entry.isDirectory())
+			.map((entry) => entry.name)
+			.sort((left, right) => right.localeCompare(left));
+
+		const snapshots: BackupSnapshot[] = [];
+
+		for (const directory of directories) {
+			const directoryPath = resolve(backupsRoot, directory);
+			const files = await readdir(directoryPath, { withFileTypes: true });
+			const zipFiles = files
+				.filter(
+					(entry) =>
+						entry.isFile() && entry.name.toLowerCase().endsWith(".zip"),
+				)
+				.map((entry) => entry.name)
+				.sort((left, right) => right.localeCompare(left));
+
+			for (const fileName of zipFiles) {
+				snapshots.push({
+					path: resolve(directoryPath, fileName),
+					directory,
+					fileName,
+				});
+
+				if (snapshots.length >= limit) {
+					return snapshots;
+				}
+			}
+		}
+
+		return snapshots;
+	} catch (error) {
+		if (
+			error &&
+			typeof error === "object" &&
+			"code" in error &&
+			error.code === "ENOENT"
+		) {
+			return [];
+		}
+
+		throw error;
+	}
 };

@@ -25,18 +25,20 @@ export const Route = createFileRoute("/api/system/restore")({
 
 				if (!target) {
 					return toBadRequest(
-						"Invalid target. Expected 'development' or 'production'.",
+						"Deployment không hợp lệ. Chỉ chấp nhận development hoặc production.",
 					);
 				}
 
 				try {
 					await runRestore(target, snapshotPath);
 					return Response.json({
-						message: `Restore completed on ${target}.`,
+						message: `Đã phục hồi dữ liệu trên môi trường ${target}.`,
 					});
 				} catch (error) {
 					const message =
-						error instanceof Error ? error.message : "Restore command failed.";
+						error instanceof Error
+							? error.message
+							: "Lệnh phục hồi dữ liệu thất bại.";
 					return Response.json({ message }, { status: 500 });
 				}
 			},

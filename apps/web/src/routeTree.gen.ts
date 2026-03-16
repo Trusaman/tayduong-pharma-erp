@@ -24,6 +24,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSystemRestoreRouteImport } from './routes/api/system/restore'
+import { Route as ApiSystemBackupsRouteImport } from './routes/api/system/backups'
 import { Route as ApiSystemBackupRouteImport } from './routes/api/system/backup'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -102,6 +103,11 @@ const ApiSystemRestoreRoute = ApiSystemRestoreRouteImport.update({
   path: '/api/system/restore',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSystemBackupsRoute = ApiSystemBackupsRouteImport.update({
+  id: '/api/system/backups',
+  path: '/api/system/backups',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSystemBackupRoute = ApiSystemBackupRouteImport.update({
   id: '/api/system/backup',
   path: '/api/system/backup',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/backups': typeof ApiSystemBackupsRoute
   '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRoutesByTo {
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/backups': typeof ApiSystemBackupsRoute
   '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRoutesById {
@@ -169,6 +177,7 @@ export interface FileRoutesById {
   '/suppliers': typeof SuppliersRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/system/backup': typeof ApiSystemBackupRoute
+  '/api/system/backups': typeof ApiSystemBackupsRoute
   '/api/system/restore': typeof ApiSystemRestoreRoute
 }
 export interface FileRouteTypes {
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/api/auth/$'
     | '/api/system/backup'
+    | '/api/system/backups'
     | '/api/system/restore'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/api/auth/$'
     | '/api/system/backup'
+    | '/api/system/backups'
     | '/api/system/restore'
   id:
     | '__root__'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/suppliers'
     | '/api/auth/$'
     | '/api/system/backup'
+    | '/api/system/backups'
     | '/api/system/restore'
   fileRoutesById: FileRoutesById
 }
@@ -248,6 +260,7 @@ export interface RootRouteChildren {
   SuppliersRoute: typeof SuppliersRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiSystemBackupRoute: typeof ApiSystemBackupRoute
+  ApiSystemBackupsRoute: typeof ApiSystemBackupsRoute
   ApiSystemRestoreRoute: typeof ApiSystemRestoreRoute
 }
 
@@ -358,6 +371,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSystemRestoreRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/system/backups': {
+      id: '/api/system/backups'
+      path: '/api/system/backups'
+      fullPath: '/api/system/backups'
+      preLoaderRoute: typeof ApiSystemBackupsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/system/backup': {
       id: '/api/system/backup'
       path: '/api/system/backup'
@@ -392,6 +412,7 @@ const rootRouteChildren: RootRouteChildren = {
   SuppliersRoute: SuppliersRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiSystemBackupRoute: ApiSystemBackupRoute,
+  ApiSystemBackupsRoute: ApiSystemBackupsRoute,
   ApiSystemRestoreRoute: ApiSystemRestoreRoute,
 }
 export const routeTree = rootRouteImport
