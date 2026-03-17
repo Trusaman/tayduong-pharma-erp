@@ -85,15 +85,29 @@ function createOrderItem(): OrderItem {
 	};
 }
 
-const getMonthInputValue = (timestamp: number) => {
-	const date = new Date(timestamp);
-	const month = String(date.getMonth() + 1).padStart(2, "0");
-	return `${date.getFullYear()}-${month}`;
+const getDateFilterTimestamp = (value: string, boundary: "start" | "end") => {
+	if (!value) {
+		return undefined;
+	}
+
+	const [year, month, day] = value.split("-").map(Number);
+	if (
+		!Number.isInteger(year) ||
+		!Number.isInteger(month) ||
+		!Number.isInteger(day)
+	) {
+		return undefined;
+	}
+
+	return boundary === "start"
+		? new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+		: new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
 };
 
 function SalesOrdersPage() {
 	const [search, setSearch] = useState("");
-	const [monthFilter, setMonthFilter] = useState("");
+	const [fromDateFilter, setFromDateFilter] = useState("");
+	const [toDateFilter, setToDateFilter] = useState("");
 	const [formDialogOpen, setFormDialogOpen] = useState(false);
 	const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 	const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -158,14 +172,18 @@ function SalesOrdersPage() {
 	const editingOrderHasFulfilledItems =
 		editingOrderDetails?.items.some((item) => item.fulfilledQuantity > 0) ??
 		false;
+	const fromDateTimestamp = getDateFilterTimestamp(fromDateFilter, "start");
+	const toDateTimestamp = getDateFilterTimestamp(toDateFilter, "end");
 
 	const filteredOrders = orders?.filter((order) => {
 		const matchesSearch =
 			order.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
 			(order.customer?.name ?? "").toLowerCase().includes(search.toLowerCase());
-		const matchesMonth =
-			!monthFilter || getMonthInputValue(order.orderDate) === monthFilter;
-		return matchesSearch && matchesMonth;
+		const matchesFromDate =
+			fromDateTimestamp === undefined || order.orderDate >= fromDateTimestamp;
+		const matchesToDate =
+			toDateTimestamp === undefined || order.orderDate <= toDateTimestamp;
+		return matchesSearch && matchesFromDate && matchesToDate;
 	});
 	const visibleOrderIds = filteredOrders?.map((order) => order._id) ?? [];
 	const selectedOrders =
@@ -878,7 +896,7 @@ function SalesOrdersPage() {
 								Bạn có thể chọn và xóa tất cả đơn hàng đang hiển thị.
 							</p>
 						</div>
-						<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-end">
 							<div className="relative w-full sm:w-64">
 								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
 								<Input
@@ -888,15 +906,43 @@ function SalesOrdersPage() {
 									className="pl-8"
 								/>
 							</div>
-							<Input
-								type="month"
-								value={monthFilter}
-								onChange={(e) => setMonthFilter(e.target.value)}
-								className="w-full sm:w-44"
-							/>
-							{monthFilter && (
-								<Button variant="outline" onClick={() => setMonthFilter("")}>
-									Xóa lọc tháng
+							<div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+								<div className="space-y-1">
+									<Label htmlFor="sales-order-from-date" className="text-xs">
+										Từ ngày
+									</Label>
+									<Input
+										id="sales-order-from-date"
+										type="date"
+										value={fromDateFilter}
+										onChange={(e) => setFromDateFilter(e.target.value)}
+										max={toDateFilter || undefined}
+										className="w-full sm:w-44"
+									/>
+								</div>
+								<div className="space-y-1">
+									<Label htmlFor="sales-order-to-date" className="text-xs">
+										Đến ngày
+									</Label>
+									<Input
+										id="sales-order-to-date"
+										type="date"
+										value={toDateFilter}
+										onChange={(e) => setToDateFilter(e.target.value)}
+										min={fromDateFilter || undefined}
+										className="w-full sm:w-44"
+									/>
+								</div>
+							</div>
+							{(fromDateFilter || toDateFilter) && (
+								<Button
+									variant="outline"
+									onClick={() => {
+										setFromDateFilter("");
+										setToDateFilter("");
+									}}
+								>
+									Xóa lọc ngày
 								</Button>
 							)}
 							<AlertDialog
