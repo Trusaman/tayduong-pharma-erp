@@ -7,8 +7,10 @@ import type {
 import { useMutation, useQuery } from "convex/react";
 import {
 	AlertTriangle,
+	Download,
 	Eye,
 	EyeOff,
+	FileSpreadsheet,
 	FolderPlus,
 	Package,
 	Pencil,
@@ -16,12 +18,26 @@ import {
 	Ruler,
 	Search,
 	Trash2,
+	TriangleAlert,
+	Upload,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -85,6 +101,70 @@ const PRESCRIPTION_TYPE_OPTIONS = [
 	{ value: "prescription", label: "Thuốc kê đơn" },
 	{ value: "non_prescription", label: "Thuốc không kê đơn" },
 	{ value: "other", label: "Khác" },
+] as const;
+
+const PRODUCT_WORKBOOK_COLUMNS = {
+	sku: "Mã SKU",
+	name: "Tên sản phẩm",
+	category: "Danh mục",
+	productType: "Phân loại",
+	activeIngredient: "Tên hoạt chất",
+	strength: "Nồng độ/Hàm lượng",
+	administrationRoute: "Đường dùng",
+	dosageForm: "Dạng bào chế",
+	packagingSpecification: "Quy cách đóng gói",
+	drugGroup: "Nhóm thuốc",
+	shelfLife: "Tuổi thọ",
+	registrationNumber: "SDK/GPNK",
+	registrationExpiryDate: "Hạn đăng ký",
+	manufacturer: "Nhà sản xuất",
+	countryOfOrigin: "Nước sản xuất",
+	unit: "Đơn vị tính",
+	declarationDate: "Ngày kê khai",
+	declarationUnit: "Đơn vị công bố KQTT",
+	declarationDecisionNumber: "Số QĐ công bố",
+	declarationValidity: "Thời hạn",
+	biddingUnit: "Đơn vị trúng thầu",
+	indication: "Chỉ định",
+	prescriptionType: "Tính chất",
+	vatRate: "Thuế GTGT (%)",
+	purchasePrice: "Giá nhập",
+	salePrice: "Giá bán",
+	minStock: "Mức tồn kho tối thiểu",
+	status: "Trạng thái bán hàng",
+	description: "Ghi chú",
+} as const;
+
+const PRODUCT_WORKBOOK_HEADER_ORDER = [
+	PRODUCT_WORKBOOK_COLUMNS.sku,
+	PRODUCT_WORKBOOK_COLUMNS.name,
+	PRODUCT_WORKBOOK_COLUMNS.category,
+	PRODUCT_WORKBOOK_COLUMNS.productType,
+	PRODUCT_WORKBOOK_COLUMNS.activeIngredient,
+	PRODUCT_WORKBOOK_COLUMNS.strength,
+	PRODUCT_WORKBOOK_COLUMNS.administrationRoute,
+	PRODUCT_WORKBOOK_COLUMNS.dosageForm,
+	PRODUCT_WORKBOOK_COLUMNS.packagingSpecification,
+	PRODUCT_WORKBOOK_COLUMNS.drugGroup,
+	PRODUCT_WORKBOOK_COLUMNS.shelfLife,
+	PRODUCT_WORKBOOK_COLUMNS.registrationNumber,
+	PRODUCT_WORKBOOK_COLUMNS.registrationExpiryDate,
+	PRODUCT_WORKBOOK_COLUMNS.manufacturer,
+	PRODUCT_WORKBOOK_COLUMNS.countryOfOrigin,
+	PRODUCT_WORKBOOK_COLUMNS.unit,
+	PRODUCT_WORKBOOK_COLUMNS.declarationDate,
+	PRODUCT_WORKBOOK_COLUMNS.declarationUnit,
+	PRODUCT_WORKBOOK_COLUMNS.declarationDecisionNumber,
+	PRODUCT_WORKBOOK_COLUMNS.declarationValidity,
+	PRODUCT_WORKBOOK_COLUMNS.biddingUnit,
+	PRODUCT_WORKBOOK_COLUMNS.indication,
+	PRODUCT_WORKBOOK_COLUMNS.prescriptionType,
+	PRODUCT_WORKBOOK_COLUMNS.vatRate,
+	PRODUCT_WORKBOOK_COLUMNS.purchasePrice,
+	PRODUCT_WORKBOOK_COLUMNS.salePrice,
+	PRODUCT_WORKBOOK_COLUMNS.minStock,
+	PRODUCT_WORKBOOK_COLUMNS.status,
+	PRODUCT_WORKBOOK_COLUMNS.description,
 ] as const;
 
 interface ProductForm {
@@ -197,6 +277,106 @@ const parseMinStock = (value: string) => {
 	return parsed;
 };
 
+const toCellString = (value: unknown) => {
+	if (value === null || value === undefined) return "";
+	if (typeof value === "number") return String(value);
+	if (typeof value === "string") return value.trim();
+	return String(value).trim();
+};
+
+const formatOptionalString = (value: string) => {
+	const trimmed = value.trim();
+	return trimmed ? trimmed : undefined;
+};
+
+const parseLocalizedNumber = (value: string): number | undefined => {
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	const cleaned = trimmed.replace(/\s+/g, "");
+	if (!/^[\d.,]+$/.test(cleaned)) return undefined;
+
+	const commaCount = cleaned.split(",").length - 1;
+	const dotCount = cleaned.split(".").length - 1;
+	let normalized = cleaned;
+
+	if (commaCount > 0 && dotCount > 0) {
+		const decimalSeparator =
+			cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".") ? "," : ".";
+		const separatorIndex = cleaned.lastIndexOf(decimalSeparator);
+		const integerPart = cleaned.slice(0, separatorIndex).replace(/[.,]/g, "");
+		const decimalPart = cleaned.slice(separatorIndex + 1).replace(/[.,]/g, "");
+		normalized = decimalPart ? `${integerPart}.${decimalPart}` : integerPart;
+	} else if (commaCount > 1 || dotCount > 1) {
+		normalized = cleaned.replace(commaCount > 1 ? /,/g : /\./g, "");
+	} else if (commaCount === 1 || dotCount === 1) {
+		const separator = commaCount === 1 ? "," : ".";
+		const separatorIndex = cleaned.lastIndexOf(separator);
+		const digitsAfter = cleaned.length - separatorIndex - 1;
+		const shouldTreatAsThousands =
+			digitsAfter === 3 && !cleaned.startsWith(`0${separator}`);
+
+		normalized = shouldTreatAsThousands
+			? cleaned.replace(separator === "," ? /,/g : /\./g, "")
+			: cleaned.replace(separator, ".");
+	}
+
+	const parsed = Number(normalized);
+	return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseImportDate = (
+	value: unknown,
+	columnLabel: string,
+	rowNumber: number,
+) => {
+	if (value === null || value === undefined || value === "") return undefined;
+
+	if (typeof value === "number" && Number.isFinite(value)) {
+		const excelEpoch = Date.UTC(1899, 11, 30);
+		return excelEpoch + Math.round(value * 24 * 60 * 60 * 1000);
+	}
+
+	const textValue = toCellString(value);
+	if (!textValue) return undefined;
+
+	const dateIsoPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+	const dateSlashPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+
+	const isoMatch = textValue.match(dateIsoPattern);
+	if (isoMatch) {
+		const [, year, month, day] = isoMatch;
+		return Date.UTC(Number(year), Number(month) - 1, Number(day));
+	}
+
+	const slashMatch = textValue.match(dateSlashPattern);
+	if (slashMatch) {
+		const [, day, month, year] = slashMatch;
+		return Date.UTC(Number(year), Number(month) - 1, Number(day));
+	}
+
+	throw new Error(
+		`Dòng ${rowNumber}: ${columnLabel} không đúng định dạng ngày`,
+	);
+};
+
+const parseSellingStatus = (value: string) => {
+	const normalized = value.trim().toLowerCase();
+	if (!normalized) return true;
+	if (
+		["đang bán", "dang ban", "active", "1", "true", "yes"].includes(normalized)
+	) {
+		return true;
+	}
+	if (
+		["ngừng bán", "ngung ban", "inactive", "0", "false", "no"].includes(
+			normalized,
+		)
+	) {
+		return false;
+	}
+	throw new Error(`Trạng thái bán hàng không hợp lệ: ${value}`);
+};
+
 type ProductRow = Doc<"products"> & {
 	totalStock: number;
 	isLowStock: boolean;
@@ -216,8 +396,13 @@ function ProductsPage() {
 	}>({});
 	const [deletingId, setDeletingId] = useState<Id<"products"> | null>(null);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+	const [selectedProductIds, setSelectedProductIds] = useState<
+		Id<"products">[]
+	>([]);
+	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 	const [toggleConfirmProduct, setToggleConfirmProduct] =
 		useState<ProductRow | null>(null);
+	const importInputRef = useRef<HTMLInputElement>(null);
 
 	// Quick add dialogs
 	const [quickCategoryOpen, setQuickCategoryOpen] = useState(false);
@@ -251,6 +436,23 @@ function ProductsPage() {
 			(activeFilter === "inactive" && !p.isActive);
 		return matchesSearch && matchesActive;
 	});
+
+	const filteredProductIds = (filteredProducts ?? []).map(
+		(product) => product._id,
+	);
+	const selectedProductIdSet = useMemo(
+		() => new Set(selectedProductIds),
+		[selectedProductIds],
+	);
+	const selectedInCurrentFilterCount = filteredProductIds.filter((id) =>
+		selectedProductIdSet.has(id),
+	).length;
+	const isAllCurrentFilteredSelected =
+		filteredProductIds.length > 0 &&
+		selectedInCurrentFilterCount === filteredProductIds.length;
+	const selectedProducts = (products ?? []).filter((product) =>
+		selectedProductIdSet.has(product._id),
+	);
 
 	const updateFormField = <K extends keyof ProductForm>(
 		field: K,
@@ -441,13 +643,521 @@ function ProductsPage() {
 
 	const handleDelete = async () => {
 		if (!deletingId) return;
+		const deletingProductId = deletingId;
 		try {
-			await deleteProduct({ id: deletingId });
+			await deleteProduct({ id: deletingProductId });
 			toast.success("Đã xóa sản phẩm thành công");
 			setDeleteDialogOpen(false);
 			setDeletingId(null);
+			setSelectedProductIds((current) =>
+				current.filter((id) => id !== deletingProductId),
+			);
 		} catch (error: unknown) {
 			toast.error(getErrorMessage(error, "Không thể xóa sản phẩm"));
+		}
+	};
+
+	const toggleSelectProduct = (id: Id<"products">, checked: boolean) => {
+		setSelectedProductIds((current) => {
+			if (checked) {
+				if (current.includes(id)) return current;
+				return [...current, id];
+			}
+			return current.filter((selectedId) => selectedId !== id);
+		});
+	};
+
+	const toggleSelectAllFiltered = (checked: boolean) => {
+		if (!filteredProductIds.length) return;
+		setSelectedProductIds((current) => {
+			if (checked) {
+				return [...new Set([...current, ...filteredProductIds])];
+			}
+			return current.filter((id) => !filteredProductIds.includes(id));
+		});
+	};
+
+	const handleRemoveSelectedProducts = async () => {
+		if (selectedProducts.length === 0) return;
+
+		let deletedCount = 0;
+		const failed: ProductRow[] = [];
+
+		for (const product of selectedProducts) {
+			try {
+				await deleteProduct({ id: product._id });
+				deletedCount += 1;
+			} catch {
+				failed.push(product);
+			}
+		}
+
+		if (deletedCount > 0) {
+			toast.success(`Đã xóa ${deletedCount} sản phẩm`);
+		}
+
+		if (failed.length > 0) {
+			toast.error(
+				`Không thể xóa ${failed.length} sản phẩm. Kiểm tra tồn kho trước khi xóa.`,
+			);
+		}
+
+		setSelectedProductIds(failed.map((product) => product._id));
+		setBulkDeleteDialogOpen(false);
+	};
+
+	const handleExportXlsx = async () => {
+		if (!filteredProducts || filteredProducts.length === 0) {
+			toast.error("Không có dữ liệu để xuất");
+			return;
+		}
+
+		try {
+			const XLSX = await import("xlsx");
+			const rows = filteredProducts.map((product) => ({
+				[PRODUCT_WORKBOOK_COLUMNS.sku]: product.sku,
+				[PRODUCT_WORKBOOK_COLUMNS.name]: product.name,
+				[PRODUCT_WORKBOOK_COLUMNS.category]:
+					categories?.find((category) => category._id === product.categoryId)
+						?.name ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.productType]:
+					PRODUCT_TYPE_OPTIONS.find(
+						(option) => option.value === product.productType,
+					)?.label ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.activeIngredient]:
+					product.activeIngredient ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.strength]: product.strength ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.administrationRoute]:
+					product.administrationRoute ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.dosageForm]: product.dosageForm ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.packagingSpecification]:
+					product.packagingSpecification ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.drugGroup]: product.drugGroup ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.shelfLife]: product.shelfLife ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.registrationNumber]:
+					product.registrationNumber ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.registrationExpiryDate]: toDateInputValue(
+					product.registrationExpiryDate,
+				),
+				[PRODUCT_WORKBOOK_COLUMNS.manufacturer]: product.manufacturer ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.countryOfOrigin]:
+					product.countryOfOrigin ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.unit]: getUnitLabel(product.unit),
+				[PRODUCT_WORKBOOK_COLUMNS.declarationDate]: toDateInputValue(
+					product.declarationDate,
+				),
+				[PRODUCT_WORKBOOK_COLUMNS.declarationUnit]:
+					product.declarationUnit ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.declarationDecisionNumber]:
+					product.declarationDecisionNumber ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.declarationValidity]:
+					product.declarationValidity ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.biddingUnit]: product.biddingUnit ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.indication]: product.indication ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.prescriptionType]:
+					PRESCRIPTION_TYPE_OPTIONS.find(
+						(option) => option.value === product.prescriptionType,
+					)?.label ?? "",
+				[PRODUCT_WORKBOOK_COLUMNS.vatRate]:
+					typeof product.vatRate === "number" ? product.vatRate : "",
+				[PRODUCT_WORKBOOK_COLUMNS.purchasePrice]: product.purchasePrice,
+				[PRODUCT_WORKBOOK_COLUMNS.salePrice]: product.salePrice,
+				[PRODUCT_WORKBOOK_COLUMNS.minStock]: product.minStock,
+				[PRODUCT_WORKBOOK_COLUMNS.status]: product.isActive
+					? "Đang bán"
+					: "Ngừng bán",
+				[PRODUCT_WORKBOOK_COLUMNS.description]: product.description ?? "",
+			}));
+
+			const worksheet = XLSX.utils.json_to_sheet(rows, {
+				header: [...PRODUCT_WORKBOOK_HEADER_ORDER],
+			});
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, worksheet, "San_pham");
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "danh-sach-san-pham.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã xuất file XLSX");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể xuất file XLSX"));
+		}
+	};
+
+	const handlePickImportFile = () => {
+		importInputRef.current?.click();
+	};
+
+	const handleDownloadTemplate = async () => {
+		try {
+			const XLSX = await import("xlsx");
+			const templateRows = [
+				{
+					[PRODUCT_WORKBOOK_COLUMNS.sku]: "SP001",
+					[PRODUCT_WORKBOOK_COLUMNS.name]: "Paracetamol 500mg",
+					[PRODUCT_WORKBOOK_COLUMNS.category]:
+						categories?.[0]?.name ?? "Tên danh mục đã có trong hệ thống",
+					[PRODUCT_WORKBOOK_COLUMNS.productType]: "Thuốc",
+					[PRODUCT_WORKBOOK_COLUMNS.activeIngredient]: "Paracetamol",
+					[PRODUCT_WORKBOOK_COLUMNS.strength]: "500mg",
+					[PRODUCT_WORKBOOK_COLUMNS.administrationRoute]: "Uống",
+					[PRODUCT_WORKBOOK_COLUMNS.dosageForm]: "Viên nén",
+					[PRODUCT_WORKBOOK_COLUMNS.packagingSpecification]:
+						"Hộp 10 vỉ x 10 viên",
+					[PRODUCT_WORKBOOK_COLUMNS.drugGroup]: "Giảm đau",
+					[PRODUCT_WORKBOOK_COLUMNS.shelfLife]: "24 tháng",
+					[PRODUCT_WORKBOOK_COLUMNS.registrationNumber]: "VD-12345-24",
+					[PRODUCT_WORKBOOK_COLUMNS.registrationExpiryDate]: "2027-12-31",
+					[PRODUCT_WORKBOOK_COLUMNS.manufacturer]: "ABC Pharma",
+					[PRODUCT_WORKBOOK_COLUMNS.countryOfOrigin]: "Việt Nam",
+					[PRODUCT_WORKBOOK_COLUMNS.unit]:
+						allUnits.find((unit) => unit.value === "tablet")?.label ?? "Viên",
+					[PRODUCT_WORKBOOK_COLUMNS.declarationDate]: "2026-01-01",
+					[PRODUCT_WORKBOOK_COLUMNS.declarationUnit]: "Bộ Y tế",
+					[PRODUCT_WORKBOOK_COLUMNS.declarationDecisionNumber]: "QĐ-001",
+					[PRODUCT_WORKBOOK_COLUMNS.declarationValidity]: "12 tháng",
+					[PRODUCT_WORKBOOK_COLUMNS.biddingUnit]: "Bệnh viện A",
+					[PRODUCT_WORKBOOK_COLUMNS.indication]: "Giảm đau, hạ sốt",
+					[PRODUCT_WORKBOOK_COLUMNS.prescriptionType]: "Thuốc không kê đơn",
+					[PRODUCT_WORKBOOK_COLUMNS.vatRate]: 5,
+					[PRODUCT_WORKBOOK_COLUMNS.purchasePrice]: 1200,
+					[PRODUCT_WORKBOOK_COLUMNS.salePrice]: 1500,
+					[PRODUCT_WORKBOOK_COLUMNS.minStock]: 20,
+					[PRODUCT_WORKBOOK_COLUMNS.status]: "Đang bán",
+					[PRODUCT_WORKBOOK_COLUMNS.description]: "",
+				},
+			];
+
+			const dataSheet = XLSX.utils.json_to_sheet(templateRows, {
+				header: [...PRODUCT_WORKBOOK_HEADER_ORDER],
+			});
+
+			const requiredColumns = [
+				PRODUCT_WORKBOOK_COLUMNS.sku,
+				PRODUCT_WORKBOOK_COLUMNS.name,
+				PRODUCT_WORKBOOK_COLUMNS.unit,
+				PRODUCT_WORKBOOK_COLUMNS.purchasePrice,
+				PRODUCT_WORKBOOK_COLUMNS.salePrice,
+			].join(", ");
+
+			const guideRows = [
+				["Hướng dẫn import sản phẩm"],
+				[`Cột bắt buộc: ${requiredColumns}`],
+				[
+					`Phân loại hợp lệ: ${PRODUCT_TYPE_OPTIONS.map((option) => option.label).join(", ")}`,
+				],
+				[
+					`Tính chất hợp lệ: ${PRESCRIPTION_TYPE_OPTIONS.map((option) => option.label).join(", ")}`,
+				],
+				["Trạng thái bán hàng: Đang bán, Ngừng bán"],
+				["Định dạng ngày: YYYY-MM-DD hoặc DD/MM/YYYY"],
+				["Giá nhập/Giá bán/Thuế/Mức tồn kho: nhập số (không kèm chữ)"],
+				[
+					`Danh mục: phải đúng tên danh mục trong hệ thống (${categories?.length ?? 0} danh mục hiện có)`,
+				],
+				[
+					`Đơn vị: có thể nhập theo tên hiển thị hoặc mã đơn vị (${allUnits.length} đơn vị hiện có)`,
+				],
+			];
+			const guideSheet = XLSX.utils.aoa_to_sheet(guideRows);
+
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, dataSheet, "Mau_import");
+			XLSX.utils.book_append_sheet(workbook, guideSheet, "Huong_dan");
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "mau-import-san-pham.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã tải file mẫu XLSX");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể tạo file mẫu XLSX"));
+		}
+	};
+
+	const handleImportXlsx = async (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+		if (!categories) {
+			toast.error("Danh mục chưa tải xong, vui lòng thử lại");
+			event.target.value = "";
+			return;
+		}
+
+		try {
+			const XLSX = await import("xlsx");
+			const fileBuffer = await file.arrayBuffer();
+			const workbook = XLSX.read(fileBuffer, { type: "array" });
+			const worksheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+			if (!worksheet) {
+				throw new Error("Không tìm thấy dữ liệu trong file import");
+			}
+
+			const headerRows = XLSX.utils.sheet_to_json<Array<string | number>>(
+				worksheet,
+				{
+					header: 1,
+					defval: "",
+				},
+			);
+			const headerRow = (headerRows[0] ?? []).map((cell) => toCellString(cell));
+			for (const requiredColumn of [
+				PRODUCT_WORKBOOK_COLUMNS.sku,
+				PRODUCT_WORKBOOK_COLUMNS.name,
+				PRODUCT_WORKBOOK_COLUMNS.unit,
+				PRODUCT_WORKBOOK_COLUMNS.purchasePrice,
+				PRODUCT_WORKBOOK_COLUMNS.salePrice,
+			]) {
+				if (!headerRow.includes(requiredColumn)) {
+					throw new Error(`File import thiếu cột bắt buộc: ${requiredColumn}`);
+				}
+			}
+
+			const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+				worksheet,
+				{ defval: "" },
+			);
+
+			type CreateProductArgs = Parameters<typeof createProduct>[0];
+			const rowsToImport: Array<{
+				rowNumber: number;
+				payload: CreateProductArgs;
+			}> = [];
+
+			for (const [index, row] of rawRows.entries()) {
+				const rowNumber = index + 2;
+				const sku = toCellString(row[PRODUCT_WORKBOOK_COLUMNS.sku]);
+				const name = toCellString(row[PRODUCT_WORKBOOK_COLUMNS.name]);
+
+				if (!sku && !name) continue;
+				if (!sku || !name) {
+					throw new Error(`Dòng ${rowNumber}: cần nhập Mã SKU và Tên sản phẩm`);
+				}
+
+				const unitInput = toCellString(row[PRODUCT_WORKBOOK_COLUMNS.unit]);
+				if (!unitInput) {
+					throw new Error(`Dòng ${rowNumber}: cần nhập Đơn vị tính`);
+				}
+				const unitMatch = allUnits.find(
+					(unit) =>
+						unit.value.toLowerCase() === unitInput.toLowerCase() ||
+						unit.label.toLowerCase() === unitInput.toLowerCase(),
+				);
+				const unitValue = unitMatch?.value ?? unitInput.toLowerCase();
+
+				const purchasePriceValue = parseLocalizedNumber(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.purchasePrice]),
+				);
+				if (purchasePriceValue === undefined || purchasePriceValue < 0) {
+					throw new Error(`Dòng ${rowNumber}: Giá nhập không hợp lệ`);
+				}
+
+				const salePriceValue = parseLocalizedNumber(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.salePrice]),
+				);
+				if (salePriceValue === undefined || salePriceValue < 0) {
+					throw new Error(`Dòng ${rowNumber}: Giá bán không hợp lệ`);
+				}
+
+				const minStockRaw = formatOptionalString(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.minStock]),
+				);
+				const minStockValue = minStockRaw
+					? parseLocalizedNumber(minStockRaw)
+					: 0;
+				if (
+					minStockValue === undefined ||
+					minStockValue < 0 ||
+					!Number.isInteger(minStockValue)
+				) {
+					throw new Error(
+						`Dòng ${rowNumber}: Mức tồn kho tối thiểu không hợp lệ`,
+					);
+				}
+
+				const vatRateRaw = formatOptionalString(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.vatRate]),
+				);
+				const vatRateValue = vatRateRaw
+					? parseLocalizedNumber(vatRateRaw)
+					: undefined;
+				if (
+					vatRateRaw &&
+					(vatRateValue === undefined || vatRateValue < 0 || vatRateValue > 100)
+				) {
+					throw new Error(`Dòng ${rowNumber}: Thuế GTGT không hợp lệ`);
+				}
+
+				const categoryName = formatOptionalString(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.category]),
+				);
+				let categoryId: Id<"categories"> | undefined;
+				if (categoryName) {
+					const categoryMatch = categories.find(
+						(category) =>
+							category.name.trim().toLowerCase() === categoryName.toLowerCase(),
+					);
+					if (!categoryMatch) {
+						throw new Error(
+							`Dòng ${rowNumber}: Không tìm thấy danh mục "${categoryName}"`,
+						);
+					}
+					categoryId = categoryMatch._id;
+				}
+
+				const productTypeRaw = formatOptionalString(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.productType]),
+				);
+				const productTypeMatch = productTypeRaw
+					? PRODUCT_TYPE_OPTIONS.find(
+							(option) =>
+								option.value === productTypeRaw.toLowerCase() ||
+								option.label.toLowerCase() === productTypeRaw.toLowerCase(),
+						)
+					: undefined;
+				if (productTypeRaw && !productTypeMatch) {
+					throw new Error(`Dòng ${rowNumber}: Phân loại không hợp lệ`);
+				}
+
+				const prescriptionTypeRaw = formatOptionalString(
+					toCellString(row[PRODUCT_WORKBOOK_COLUMNS.prescriptionType]),
+				);
+				const prescriptionTypeMatch = prescriptionTypeRaw
+					? PRESCRIPTION_TYPE_OPTIONS.find(
+							(option) =>
+								option.value === prescriptionTypeRaw.toLowerCase() ||
+								option.label.toLowerCase() ===
+									prescriptionTypeRaw.toLowerCase(),
+						)
+					: undefined;
+				if (prescriptionTypeRaw && !prescriptionTypeMatch) {
+					throw new Error(`Dòng ${rowNumber}: Tính chất không hợp lệ`);
+				}
+
+				const statusRaw = toCellString(row[PRODUCT_WORKBOOK_COLUMNS.status]);
+				const isActive = parseSellingStatus(statusRaw);
+
+				rowsToImport.push({
+					rowNumber,
+					payload: {
+						name,
+						sku,
+						categoryId,
+						productType: productTypeMatch?.value,
+						activeIngredient: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.activeIngredient]),
+						),
+						strength: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.strength]),
+						),
+						administrationRoute: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.administrationRoute]),
+						),
+						dosageForm: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.dosageForm]),
+						),
+						packagingSpecification: formatOptionalString(
+							toCellString(
+								row[PRODUCT_WORKBOOK_COLUMNS.packagingSpecification],
+							),
+						),
+						drugGroup: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.drugGroup]),
+						),
+						shelfLife: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.shelfLife]),
+						),
+						registrationNumber: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.registrationNumber]),
+						),
+						registrationExpiryDate: parseImportDate(
+							row[PRODUCT_WORKBOOK_COLUMNS.registrationExpiryDate],
+							PRODUCT_WORKBOOK_COLUMNS.registrationExpiryDate,
+							rowNumber,
+						),
+						manufacturer: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.manufacturer]),
+						),
+						countryOfOrigin: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.countryOfOrigin]),
+						),
+						description: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.description]),
+						),
+						unit: unitValue,
+						declarationDate: parseImportDate(
+							row[PRODUCT_WORKBOOK_COLUMNS.declarationDate],
+							PRODUCT_WORKBOOK_COLUMNS.declarationDate,
+							rowNumber,
+						),
+						declarationUnit: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.declarationUnit]),
+						),
+						declarationDecisionNumber: formatOptionalString(
+							toCellString(
+								row[PRODUCT_WORKBOOK_COLUMNS.declarationDecisionNumber],
+							),
+						),
+						declarationValidity: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.declarationValidity]),
+						),
+						biddingUnit: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.biddingUnit]),
+						),
+						indication: formatOptionalString(
+							toCellString(row[PRODUCT_WORKBOOK_COLUMNS.indication]),
+						),
+						prescriptionType: prescriptionTypeMatch?.value,
+						vatRate: vatRateValue,
+						isActive,
+						purchasePrice: purchasePriceValue,
+						salePrice: salePriceValue,
+						minStock: minStockValue,
+					},
+				});
+			}
+
+			if (rowsToImport.length === 0) {
+				throw new Error("File import không có dữ liệu hợp lệ");
+			}
+
+			for (const row of rowsToImport) {
+				try {
+					await createProduct(row.payload);
+				} catch (error: unknown) {
+					throw new Error(
+						`Dòng ${row.rowNumber}: ${getErrorMessage(
+							error,
+							"Không thể import sản phẩm",
+						)}`,
+					);
+				}
+			}
+
+			toast.success(`Đã import ${rowsToImport.length} sản phẩm`);
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể import file XLSX"));
+		} finally {
+			event.target.value = "";
 		}
 	};
 
@@ -1033,10 +1743,34 @@ function ProductsPage() {
 
 			<Card>
 				<CardHeader>
-					<div className="flex items-center justify-between">
-						<CardTitle>Danh sách sản phẩm</CardTitle>
-						<div className="flex items-center gap-2">
-							<div className="relative w-56">
+					<div className="flex flex-col gap-3">
+						<div className="flex flex-wrap items-center justify-between gap-2">
+							<CardTitle>Danh sách sản phẩm</CardTitle>
+							<div className="flex flex-wrap items-center gap-2">
+								<Button variant="outline" onClick={handlePickImportFile}>
+									<Upload className="mr-2 h-4 w-4" />
+									Import XLSX
+								</Button>
+								<Button variant="outline" onClick={handleExportXlsx}>
+									<Download className="mr-2 h-4 w-4" />
+									Export XLSX
+								</Button>
+								<Button variant="outline" onClick={handleDownloadTemplate}>
+									<FileSpreadsheet className="mr-2 h-4 w-4" />
+									Tải mẫu XLSX
+								</Button>
+								<Button
+									variant="destructive"
+									disabled={selectedProducts.length === 0}
+									onClick={() => setBulkDeleteDialogOpen(true)}
+								>
+									<Trash2 className="mr-2 h-4 w-4" />
+									Xóa đã chọn ({selectedProducts.length})
+								</Button>
+							</div>
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="relative min-w-[220px] flex-1">
 								<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
 								<Input
 									placeholder="Tìm kiếm sản phẩm..."
@@ -1051,7 +1785,7 @@ function ProductsPage() {
 									v && setActiveFilter(v as typeof activeFilter)
 								}
 							>
-								<SelectTrigger className="w-36">
+								<SelectTrigger className="w-[180px]">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -1064,6 +1798,13 @@ function ProductsPage() {
 					</div>
 				</CardHeader>
 				<CardContent>
+					<input
+						ref={importInputRef}
+						type="file"
+						accept=".xlsx,.xls"
+						className="hidden"
+						onChange={handleImportXlsx}
+					/>
 					{products === undefined ? (
 						<div className="py-8 text-center text-muted-foreground">
 							Đang tải...
@@ -1077,6 +1818,14 @@ function ProductsPage() {
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead className="w-[44px]">
+										<Checkbox
+											checked={isAllCurrentFilteredSelected}
+											onCheckedChange={(checked) =>
+												toggleSelectAllFiltered(Boolean(checked))
+											}
+										/>
+									</TableHead>
 									<TableHead>Mã SKU</TableHead>
 									<TableHead>Tên</TableHead>
 									<TableHead>Danh mục</TableHead>
@@ -1092,6 +1841,14 @@ function ProductsPage() {
 							<TableBody>
 								{filteredProducts?.map((product) => (
 									<TableRow key={product._id}>
+										<TableCell>
+											<Checkbox
+												checked={selectedProductIdSet.has(product._id)}
+												onCheckedChange={(checked) =>
+													toggleSelectProduct(product._id, Boolean(checked))
+												}
+											/>
+										</TableCell>
 										<TableCell className="font-mono text-sm">
 											{product.sku}
 										</TableCell>
@@ -1174,29 +1931,76 @@ function ProductsPage() {
 				</CardContent>
 			</Card>
 
-			{/* Delete Confirmation Dialog */}
-			<Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Xóa sản phẩm</DialogTitle>
-						<DialogDescription>
-							Bạn có chắc muốn xóa sản phẩm này? Hành động này không thể hoàn
+			<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-destructive/10 text-destructive">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận xóa sản phẩm</AlertDialogTitle>
+						<AlertDialogDescription>
+							Bạn sắp xóa sản phẩm này khỏi hệ thống. Hành động không thể hoàn
 							tác.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setDeleteDialogOpen(false)}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							onClick={handleDelete}
 						>
-							Hủy
-						</Button>
-						<Button variant="destructive" onClick={handleDelete}>
-							Xóa
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+							Xác nhận xóa
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={bulkDeleteDialogOpen}
+				onOpenChange={setBulkDeleteDialogOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-destructive/10 text-destructive">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận xóa nhiều sản phẩm</AlertDialogTitle>
+						<AlertDialogDescription>
+							Bạn sắp xóa {selectedProducts.length} sản phẩm đã chọn. Hành động
+							không thể hoàn tác.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					{selectedProducts.length > 0 && (
+						<div className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-muted/40 p-3 text-sm">
+							{selectedProducts.slice(0, 8).map((product) => (
+								<div
+									key={product._id}
+									className="flex items-center justify-between gap-3"
+								>
+									<span className="font-mono text-xs">{product.sku}</span>
+									<span className="truncate text-muted-foreground">
+										{product.name}
+									</span>
+								</div>
+							))}
+							{selectedProducts.length > 8 && (
+								<p className="text-muted-foreground text-xs">
+									+{selectedProducts.length - 8} sản phẩm nữa
+								</p>
+							)}
+						</div>
+					)}
+					<AlertDialogFooter>
+						<AlertDialogCancel>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							onClick={handleRemoveSelectedProducts}
+						>
+							Xác nhận xóa đã chọn
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			{/* Toggle Active Confirmation Dialog */}
 			<Dialog
