@@ -1,10 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { KeyRound, Pencil, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import {
+	KeyRound,
+	Pencil,
+	ShieldCheck,
+	Trash2,
+	TriangleAlert,
+	UserPlus,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -101,6 +119,13 @@ function AdminUsersPage() {
 		null,
 	);
 	const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+	const [pendingDeleteUser, setPendingDeleteUser] =
+		useState<AdminManagedUser | null>(null);
+	const [pendingRoleChange, setPendingRoleChange] = useState<{
+		user: AdminManagedUser;
+		currentRole: UserRole;
+		nextRole: UserRole;
+	} | null>(null);
 
 	const [editingUser, setEditingUser] = useState<AdminManagedUser | null>(null);
 	const [editName, setEditName] = useState("");
@@ -287,17 +312,25 @@ function AdminUsersPage() {
 		}
 	};
 
-	const handleDeleteUser = async (user: AdminManagedUser) => {
+	const handleRequestDeleteUser = (user: AdminManagedUser) => {
 		const userId = getUserId(user);
 		if (!userId) {
 			toast.error("Không xác định được mã người dùng");
 			return;
 		}
 
-		const confirmed = window.confirm(
-			`Bạn có chắc muốn xóa người dùng ${user.email ?? user.name ?? userId}?`,
-		);
-		if (!confirmed) {
+		setPendingDeleteUser(user);
+	};
+
+	const handleDeleteUser = async () => {
+		if (!pendingDeleteUser) {
+			return;
+		}
+
+		const userId = getUserId(pendingDeleteUser);
+		if (!userId) {
+			toast.error("Không xác định được mã người dùng");
+			setPendingDeleteUser(null);
 			return;
 		}
 
@@ -305,6 +338,7 @@ function AdminUsersPage() {
 		try {
 			await adminDeleteUser({ userId });
 			toast.success("Đã xóa người dùng");
+			setPendingDeleteUser(null);
 			await loadUsers(false);
 		} catch (error: unknown) {
 			toast.error(getErrorMessage(error, "Không thể xóa người dùng"));
@@ -313,7 +347,7 @@ function AdminUsersPage() {
 		}
 	};
 
-	const handleChangeUserRole = async (
+	const handleRequestRoleChange = (
 		user: AdminManagedUser,
 		nextRole: UserRole,
 	) => {
@@ -323,14 +357,52 @@ function AdminUsersPage() {
 			return;
 		}
 
+		const currentRole = getEffectiveRole(user);
+		if (nextRole === currentRole) {
+			return;
+		}
+
+		setPendingRoleChange({
+			user,
+			currentRole,
+			nextRole,
+		});
+	};
+
+	const handleChangeUserRole = async (
+		user: AdminManagedUser,
+		nextRole: UserRole,
+	) => {
+		const userId = getUserId(user);
+		if (!userId) {
+			toast.error("Không xác định được mã người dùng");
+			return false;
+		}
+
 		setChangingRoleUserId(userId);
 		try {
 			await adminSetUserRole({ userId, role: nextRole });
 			toast.success("Đã cập nhật quyền người dùng");
+			return true;
 		} catch (error: unknown) {
 			toast.error(getErrorMessage(error, "Không thể cập nhật quyền"));
+			return false;
 		} finally {
 			setChangingRoleUserId(null);
+		}
+	};
+
+	const handleConfirmRoleChange = async () => {
+		if (!pendingRoleChange) {
+			return;
+		}
+
+		const updated = await handleChangeUserRole(
+			pendingRoleChange.user,
+			pendingRoleChange.nextRole,
+		);
+		if (updated) {
+			setPendingRoleChange(null);
 		}
 	};
 
@@ -517,7 +589,7 @@ function AdminUsersPage() {
 												<Select
 													value={getEffectiveRole(user)}
 													onValueChange={(value) =>
-														void handleChangeUserRole(user, value as UserRole)
+														handleRequestRoleChange(user, value as UserRole)
 													}
 													disabled={changingRoleUserId === getUserId(user)}
 												>
@@ -556,7 +628,7 @@ function AdminUsersPage() {
 														variant="destructive"
 														size="sm"
 														disabled={deletingUserId === getUserId(user)}
-														onClick={() => void handleDeleteUser(user)}
+														onClick={() => handleRequestDeleteUser(user)}
 													>
 														<Trash2 className="mr-2 h-4 w-4" />
 														{deletingUserId === getUserId(user)
@@ -677,6 +749,75 @@ function AdminUsersPage() {
 					</form>
 				</DialogContent>
 			</Dialog>
+
+			<AlertDialog
+				open={!!pendingRoleChange}
+				onOpenChange={(open) => {
+					if (!open && !changingRoleUserId) {
+						setPendingRoleChange(null);
+					}
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-amber-100 text-amber-700">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận thay đổi quyền</AlertDialogTitle>
+						<AlertDialogDescription>
+							{pendingRoleChange
+								? `Bạn sắp đổi quyền của ${pendingRoleChange.user.email ?? pendingRoleChange.user.name ?? getUserId(pendingRoleChange.user)} từ ${pendingRoleChange.currentRole} sang ${pendingRoleChange.nextRole}.`
+								: "Xác nhận thay đổi quyền người dùng."}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={!!changingRoleUserId}>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								void handleConfirmRoleChange();
+							}}
+							disabled={!!changingRoleUserId}
+						>
+							{changingRoleUserId ? "Đang cập nhật..." : "Xác nhận thay đổi"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={!!pendingDeleteUser}
+				onOpenChange={(open) => {
+					if (!open && !deletingUserId) {
+						setPendingDeleteUser(null);
+					}
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia className="bg-destructive/10 text-destructive">
+							<TriangleAlert className="h-5 w-5" />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Xác nhận xóa người dùng</AlertDialogTitle>
+						<AlertDialogDescription>
+							{pendingDeleteUser
+								? `Bạn sắp xóa người dùng ${pendingDeleteUser.email ?? pendingDeleteUser.name ?? getUserId(pendingDeleteUser)}. Hành động này không thể hoàn tác.`
+								: "Xác nhận xóa người dùng khỏi hệ thống."}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={!!deletingUserId}>Hủy</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+							onClick={() => {
+								void handleDeleteUser();
+							}}
+							disabled={!!deletingUserId}
+						>
+							{deletingUserId ? "Đang xóa..." : "Xác nhận xóa"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }
