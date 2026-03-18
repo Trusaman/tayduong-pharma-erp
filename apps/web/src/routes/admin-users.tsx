@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
+	Download,
+	History,
 	KeyRound,
 	Pencil,
 	ShieldCheck,
@@ -69,6 +71,44 @@ type ListUsersResponse = {
 	total?: number;
 };
 
+type AdminAuditLog = {
+	id?: string;
+	action: string;
+	description: string;
+	entityType?: string;
+	entityId?: string;
+	actorUserId?: string;
+	actorEmail?: string;
+	before?: unknown;
+	after?: unknown;
+	metadata?: unknown;
+	createdAt: number;
+};
+
+const AUDIT_LOG_WORKBOOK_COLUMNS = {
+	time: "Thời gian",
+	actor: "Người thực hiện",
+	action: "Hành động",
+	description: "Mô tả",
+	entityType: "Entity type",
+	entityId: "Entity id",
+	before: "Before",
+	after: "After",
+	metadata: "Metadata",
+} as const;
+
+const AUDIT_LOG_WORKBOOK_HEADER_ORDER = [
+	AUDIT_LOG_WORKBOOK_COLUMNS.time,
+	AUDIT_LOG_WORKBOOK_COLUMNS.actor,
+	AUDIT_LOG_WORKBOOK_COLUMNS.action,
+	AUDIT_LOG_WORKBOOK_COLUMNS.description,
+	AUDIT_LOG_WORKBOOK_COLUMNS.entityType,
+	AUDIT_LOG_WORKBOOK_COLUMNS.entityId,
+	AUDIT_LOG_WORKBOOK_COLUMNS.before,
+	AUDIT_LOG_WORKBOOK_COLUMNS.after,
+	AUDIT_LOG_WORKBOOK_COLUMNS.metadata,
+] as const;
+
 type UserRole = "admin" | "user";
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -92,6 +132,42 @@ function formatCreatedAt(createdAt: number | undefined) {
 	return new Date(createdAt).toLocaleString("vi-VN");
 }
 
+function formatAuditAction(action: string) {
+	switch (action) {
+		case "user.created":
+			return "Tạo user";
+		case "user.updated":
+			return "Sửa user";
+		case "user.deleted":
+			return "Xóa user";
+		case "user.role_changed":
+			return "Đổi quyền";
+		case "user.password_changed":
+			return "Đổi mật khẩu";
+		default:
+			return action;
+	}
+}
+
+function getDateFilterTimestamp(value: string, boundary: "start" | "end") {
+	if (!value) {
+		return undefined;
+	}
+
+	const [year, month, day] = value.split("-").map(Number);
+	if (
+		!Number.isInteger(year) ||
+		!Number.isInteger(month) ||
+		!Number.isInteger(day)
+	) {
+		return undefined;
+	}
+
+	return boundary === "start"
+		? new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+		: new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+}
+
 function AdminUsersPage() {
 	const isCurrentUserAdmin = useQuery(api.auth.isCurrentUserAdmin);
 	const bootstrapAdminRole = useMutation(api.auth.bootstrapAdminRole);
@@ -105,10 +181,38 @@ function AdminUsersPage() {
 		api.auth.adminGetUserRoleOverrides,
 		isCurrentUserAdmin ? {} : "skip",
 	);
+	const [auditFromDate, setAuditFromDate] = useState("");
+	const [auditToDate, setAuditToDate] = useState("");
+	const [isExportingAuditLogs, setIsExportingAuditLogs] = useState(false);
+
+	const auditFromTs = useMemo(
+		() => getDateFilterTimestamp(auditFromDate, "start"),
+		[auditFromDate],
+	);
+	const auditToTs = useMemo(
+		() => getDateFilterTimestamp(auditToDate, "end"),
+		[auditToDate],
+	);
+	const isAuditRangeInvalid =
+		auditFromTs !== undefined &&
+		auditToTs !== undefined &&
+		auditFromTs > auditToTs;
+
+	const auditLogs = useQuery(
+		api.auth.adminListAuditLogs,
+		isCurrentUserAdmin && !isAuditRangeInvalid
+			? {
+					limit: 300,
+					fromTs: auditFromTs,
+					toTs: auditToTs,
+				}
+			: "skip",
+	);
 
 	const [users, setUsers] = useState<AdminManagedUser[]>([]);
 	const [isLoadingUsers, setIsLoadingUsers] = useState(false);
 	const [search, setSearch] = useState("");
+	const [auditSearch, setAuditSearch] = useState("");
 
 	const [createName, setCreateName] = useState("");
 	const [createEmail, setCreateEmail] = useState("");
@@ -214,6 +318,25 @@ function AdminUsersPage() {
 			return name.includes(keyword) || email.includes(keyword);
 		});
 	}, [search, users]);
+
+	const filteredAuditLogs = useMemo(() => {
+		const source = (auditLogs ?? []) as AdminAuditLog[];
+		const keyword = auditSearch.trim().toLowerCase();
+		if (!keyword) {
+			return source;
+		}
+
+		return source.filter((logItem) => {
+			const actor = (logItem.actorEmail ?? logItem.actorUserId ?? "").toLowerCase();
+			const description = (logItem.description ?? "").toLowerCase();
+			const action = formatAuditAction(logItem.action).toLowerCase();
+			return (
+				actor.includes(keyword) ||
+				description.includes(keyword) ||
+				action.includes(keyword)
+			);
+		});
+	}, [auditLogs, auditSearch]);
 
 	const roleByUserId = useMemo(
 		() =>
@@ -437,6 +560,65 @@ function AdminUsersPage() {
 		}
 	};
 
+	const handleExportAuditLogs = async () => {
+		if (isAuditRangeInvalid) {
+			toast.error("Khoảng thời gian lọc không hợp lệ");
+			return;
+		}
+
+		if (filteredAuditLogs.length === 0) {
+			toast.error("Không có dữ liệu để xuất");
+			return;
+		}
+
+		setIsExportingAuditLogs(true);
+		try {
+			const XLSX = await import("xlsx");
+			const rows = filteredAuditLogs.map((logItem) => ({
+				[AUDIT_LOG_WORKBOOK_COLUMNS.time]: formatCreatedAt(logItem.createdAt),
+				[AUDIT_LOG_WORKBOOK_COLUMNS.actor]:
+					logItem.actorEmail ?? logItem.actorUserId ?? "-",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.action]: formatAuditAction(logItem.action),
+				[AUDIT_LOG_WORKBOOK_COLUMNS.description]: logItem.description,
+				[AUDIT_LOG_WORKBOOK_COLUMNS.entityType]: logItem.entityType ?? "",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.entityId]: logItem.entityId ?? "",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.before]: logItem.before
+					? JSON.stringify(logItem.before)
+					: "",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.after]: logItem.after
+					? JSON.stringify(logItem.after)
+					: "",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.metadata]: logItem.metadata
+					? JSON.stringify(logItem.metadata)
+					: "",
+			}));
+
+			const worksheet = XLSX.utils.json_to_sheet(rows, {
+				header: [...AUDIT_LOG_WORKBOOK_HEADER_ORDER],
+			});
+			const workbook = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(workbook, worksheet, "Audit_Logs");
+
+			const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+			const blob = new Blob([output], {
+				type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "nhat-ky-thay-doi.xlsx";
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			toast.success("Đã xuất file nhật ký thay đổi");
+		} catch (error: unknown) {
+			toast.error(getErrorMessage(error, "Không thể xuất file nhật ký"));
+		} finally {
+			setIsExportingAuditLogs(false);
+		}
+	};
+
 	if (isCurrentUserAdmin === undefined) {
 		return (
 			<div className="space-y-4">
@@ -645,6 +827,120 @@ function AdminUsersPage() {
 					</CardContent>
 				</Card>
 			</div>
+
+			<Card>
+				<CardHeader className="gap-3">
+					<CardTitle className="flex items-center gap-2">
+						<History className="h-5 w-5" />
+						Nhật ký thay đổi
+					</CardTitle>
+					<div className="flex flex-wrap items-end gap-3">
+						<div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+							<div className="space-y-1">
+								<Label htmlFor="audit-log-from-date" className="text-xs">
+									Từ ngày
+								</Label>
+								<Input
+									id="audit-log-from-date"
+									type="date"
+									value={auditFromDate}
+									onChange={(event) => setAuditFromDate(event.target.value)}
+									max={auditToDate || undefined}
+									className="w-full sm:w-44"
+								/>
+							</div>
+							<div className="space-y-1">
+								<Label htmlFor="audit-log-to-date" className="text-xs">
+									Đến ngày
+								</Label>
+								<Input
+									id="audit-log-to-date"
+									type="date"
+									value={auditToDate}
+									onChange={(event) => setAuditToDate(event.target.value)}
+									min={auditFromDate || undefined}
+									className="w-full sm:w-44"
+								/>
+							</div>
+						</div>
+						{(auditFromDate || auditToDate) && (
+							<Button
+								variant="outline"
+								onClick={() => {
+									setAuditFromDate("");
+									setAuditToDate("");
+								}}
+							>
+								Xóa lọc ngày
+							</Button>
+						)}
+						<Button
+							variant="outline"
+							onClick={() => void handleExportAuditLogs()}
+							disabled={
+								isExportingAuditLogs ||
+								filteredAuditLogs.length === 0 ||
+								isAuditRangeInvalid
+							}
+						>
+							<Download className="mr-2 h-4 w-4" />
+							{isExportingAuditLogs ? "Đang xuất..." : "Xuất Excel"}
+						</Button>
+					</div>
+					<Input
+						value={auditSearch}
+						onChange={(event) => setAuditSearch(event.target.value)}
+						placeholder="Tìm theo hành động, người thực hiện hoặc mô tả"
+					/>
+				</CardHeader>
+				<CardContent>
+					{isAuditRangeInvalid ? (
+						<p className="py-6 text-center text-muted-foreground">
+							Khoảng thời gian không hợp lệ. Vui lòng chọn lại từ ngày/đến ngày.
+						</p>
+					) : auditLogs === undefined ? (
+						<p className="py-6 text-center text-muted-foreground">
+							Đang tải nhật ký thay đổi...
+						</p>
+					) : filteredAuditLogs.length === 0 ? (
+						<p className="py-6 text-center text-muted-foreground">
+							Chưa có bản ghi phù hợp.
+						</p>
+					) : (
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Thời gian</TableHead>
+									<TableHead>Người thực hiện</TableHead>
+									<TableHead>Hành động</TableHead>
+									<TableHead>Mô tả</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{filteredAuditLogs.map((logItem) => (
+									<TableRow
+										key={
+											logItem.id ??
+											`${logItem.createdAt}-${logItem.action}-${logItem.entityId ?? "unknown"}`
+										}
+									>
+										<TableCell>{formatCreatedAt(logItem.createdAt)}</TableCell>
+										<TableCell>
+											{logItem.actorEmail ?? logItem.actorUserId ?? "-"}
+										</TableCell>
+										<TableCell>
+											<span className="inline-flex rounded bg-muted px-2 py-0.5 font-medium text-xs">
+												{formatAuditAction(logItem.action)}
+											</span>
+										</TableCell>
+										<TableCell>{logItem.description}</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					)}
+				</CardContent>
+			</Card>
 
 			<Dialog
 				open={!!editingUser}

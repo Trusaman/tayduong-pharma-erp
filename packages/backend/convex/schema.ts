@@ -12,6 +12,23 @@ export default defineSchema({
 		.index("by_userId", ["userId"])
 		.index("by_role", ["role"]),
 
+	// Admin audit logs for user management actions
+	auditLogs: defineTable({
+		action: v.string(),
+		description: v.string(),
+		entityType: v.string(),
+		entityId: v.optional(v.string()),
+		actorUserId: v.optional(v.string()),
+		actorEmail: v.optional(v.string()),
+		beforeJson: v.optional(v.string()),
+		afterJson: v.optional(v.string()),
+		metadataJson: v.optional(v.string()),
+		createdAt: v.number(),
+	})
+		.index("by_createdAt", ["createdAt"])
+		.index("by_entityType_and_entityId", ["entityType", "entityId"])
+		.index("by_actorUserId_and_createdAt", ["actorUserId", "createdAt"]),
+
 	// Product Categories
 	categories: defineTable({
 		name: v.string(),

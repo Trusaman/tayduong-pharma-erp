@@ -45,6 +45,18 @@ const runtimeAdminUserIds = new Set(configuredAdminUserIds);
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type AdminRole = "admin" | "user";
 
+type AuditLogPayload = {
+	action: string;
+	description: string;
+	entityType: string;
+	entityId?: string;
+	actorUserId?: string;
+	actorEmail?: string | null;
+	before?: unknown;
+	after?: unknown;
+	metadata?: unknown;
+};
+
 function parseTimestamp(value: unknown) {
 	if (typeof value === "number" && Number.isFinite(value)) {
 		return value;
@@ -56,6 +68,32 @@ function parseTimestamp(value: unknown) {
 		}
 	}
 	return undefined;
+}
+
+function stringifyAuditValue(value: unknown) {
+	if (value === undefined) {
+		return undefined;
+	}
+
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return JSON.stringify({
+			serializationError: true,
+		});
+	}
+}
+
+function parseAuditValue(value: string | undefined) {
+	if (!value) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(value);
+	} catch {
+		return null;
+	}
 }
 
 function toObjectArray(value: unknown) {
@@ -86,6 +124,69 @@ function extractRowsFromAdapterResult(result: unknown) {
 	}
 
 	return [];
+}
+
+function extractRoleFromUserRow(userRow: Record<string, unknown> | null) {
+	if (!userRow) {
+		return "user" as const;
+	}
+
+	if (typeof userRow.role === "string" && userRow.role === "admin") {
+		return "admin" as const;
+	}
+
+	if (Array.isArray(userRow.role) && userRow.role.includes("admin")) {
+		return "admin" as const;
+	}
+
+	return "user" as const;
+}
+
+function buildAuditUserSnapshot(userRow: Record<string, unknown> | null) {
+	if (!userRow) {
+		return null;
+	}
+
+	return {
+		id:
+			normalizeIdValue(userRow.id) ??
+			normalizeIdValue(userRow._id) ??
+			normalizeIdValue(userRow.userId),
+		name: typeof userRow.name === "string" ? userRow.name : null,
+		email: typeof userRow.email === "string" ? userRow.email : null,
+		role: extractRoleFromUserRow(userRow),
+		createdAt: parseTimestamp(userRow.createdAt),
+	};
+}
+
+async function findAuthUserRowById(
+	ctx: QueryCtx | MutationCtx,
+	userId: string,
+) {
+	const rows = extractRowsFromAdapterResult(
+		await ctx.runQuery(components.betterAuth.adapter.findMany, {
+			model: "user",
+			where: [{ field: "_id", operator: "eq", value: userId }],
+			paginationOpts: { cursor: null, numItems: 1 },
+		}),
+	);
+
+	return rows[0] ?? null;
+}
+
+async function insertAuditLog(ctx: MutationCtx, payload: AuditLogPayload) {
+	await ctx.db.insert("auditLogs", {
+		action: payload.action,
+		description: payload.description,
+		entityType: payload.entityType,
+		entityId: payload.entityId,
+		actorUserId: payload.actorUserId,
+		actorEmail: payload.actorEmail ?? undefined,
+		beforeJson: stringifyAuditValue(payload.before),
+		afterJson: stringifyAuditValue(payload.after),
+		metadataJson: stringifyAuditValue(payload.metadata),
+		createdAt: Date.now(),
+	});
 }
 
 function isConfiguredAdminEmail(email: string) {
@@ -365,6 +466,7 @@ export const adminCreateUser = mutation({
 	},
 	handler: async (ctx, args) => {
 		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await resolveAdminState(ctx);
 
 		const name = args.name.trim();
 		const email = args.email.trim().toLowerCase();
@@ -406,6 +508,21 @@ export const adminCreateUser = mutation({
 			runtimeAdminUserIds.add(result.user.id);
 		}
 
+		await insertAuditLog(ctx, {
+			action: "user.created",
+			description: `Tạo người dùng ${result.user.email}`,
+			entityType: "user",
+			entityId: result.user.id,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			after: {
+				id: result.user.id,
+				name: result.user.name,
+				email: result.user.email,
+				role,
+			},
+		});
+
 		return {
 			success: true,
 			user: {
@@ -431,6 +548,83 @@ export const adminGetUserRoleOverrides = query({
 	},
 });
 
+export const adminListAuditLogs = query({
+	args: {
+		limit: v.optional(v.number()),
+		fromTs: v.optional(v.number()),
+		toTs: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		await requireAdmin(ctx);
+
+		const paginationLimit =
+			typeof args.limit === "number" && args.limit > 0
+				? Math.min(Math.floor(args.limit), 300)
+				: 100;
+
+		const fromTs =
+			typeof args.fromTs === "number" && Number.isFinite(args.fromTs)
+				? Math.floor(args.fromTs)
+				: undefined;
+		const toTs =
+			typeof args.toTs === "number" && Number.isFinite(args.toTs)
+				? Math.floor(args.toTs)
+				: undefined;
+
+		if (
+			fromTs !== undefined &&
+			toTs !== undefined &&
+			fromTs > toTs
+		) {
+			throw new Error("Khoảng thời gian không hợp lệ");
+		}
+
+		const logsQuery = (() => {
+			if (fromTs !== undefined && toTs !== undefined) {
+				return ctx.db
+					.query("auditLogs")
+					.withIndex("by_createdAt", (query) =>
+						query.gte("createdAt", fromTs).lte("createdAt", toTs),
+					);
+			}
+
+			if (fromTs !== undefined) {
+				return ctx.db
+					.query("auditLogs")
+					.withIndex("by_createdAt", (query) =>
+						query.gte("createdAt", fromTs),
+					);
+			}
+
+			if (toTs !== undefined) {
+				return ctx.db
+					.query("auditLogs")
+					.withIndex("by_createdAt", (query) =>
+						query.lte("createdAt", toTs),
+					);
+			}
+
+			return ctx.db.query("auditLogs").withIndex("by_createdAt");
+		})();
+
+		const logs = await logsQuery.order("desc").take(paginationLimit);
+
+		return logs.map((item) => ({
+			id: item._id,
+			action: item.action,
+			description: item.description,
+			entityType: item.entityType,
+			entityId: item.entityId,
+			actorUserId: item.actorUserId,
+			actorEmail: item.actorEmail,
+			before: parseAuditValue(item.beforeJson),
+			after: parseAuditValue(item.afterJson),
+			metadata: parseAuditValue(item.metadataJson),
+			createdAt: item.createdAt,
+		}));
+	},
+});
+
 export const adminSetUserRole = mutation({
 	args: {
 		userId: v.string(),
@@ -438,6 +632,13 @@ export const adminSetUserRole = mutation({
 	},
 	handler: async (ctx, args) => {
 		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await resolveAdminState(ctx);
+		const userRow = await findAuthUserRowById(ctx, args.userId);
+		const roleOverride = await ctx.db
+			.query("authUserRoles")
+			.withIndex("by_userId", (query) => query.eq("userId", args.userId))
+			.first();
+		const previousRole = roleOverride?.role ?? extractRoleFromUserRow(userRow);
 
 		if (
 			args.userId === adminUserId &&
@@ -461,6 +662,24 @@ export const adminSetUserRole = mutation({
 			}
 		}
 
+		await insertAuditLog(ctx, {
+			action: "user.role_changed",
+			description: `Đổi quyền người dùng ${typeof userRow?.email === "string" ? userRow.email : args.userId} từ ${previousRole} sang ${args.role}`,
+			entityType: "user",
+			entityId: args.userId,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			before: {
+				role: previousRole,
+			},
+			after: {
+				role: args.role,
+			},
+			metadata: {
+				target: buildAuditUserSnapshot(userRow),
+			},
+		});
+
 		return {
 			success: true,
 		};
@@ -473,7 +692,9 @@ export const adminSetUserPassword = mutation({
 		newPassword: v.string(),
 	},
 	handler: async (ctx, args) => {
-		await requireAdminUserId(ctx);
+		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await resolveAdminState(ctx);
+		const userRow = await findAuthUserRowById(ctx, args.userId);
 
 		const nextPassword = args.newPassword.trim();
 		if (nextPassword.length < 8) {
@@ -490,6 +711,18 @@ export const adminSetUserPassword = mutation({
 			body: {
 				userId: args.userId,
 				newPassword: nextPassword,
+			},
+		});
+
+		await insertAuditLog(ctx, {
+			action: "user.password_changed",
+			description: `Đổi mật khẩu người dùng ${typeof userRow?.email === "string" ? userRow.email : args.userId}`,
+			entityType: "user",
+			entityId: args.userId,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			metadata: {
+				target: buildAuditUserSnapshot(userRow),
 			},
 		});
 
@@ -565,7 +798,9 @@ export const adminUpdateUser = mutation({
 		email: v.string(),
 	},
 	handler: async (ctx, args) => {
-		await requireAdminUserId(ctx);
+		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await resolveAdminState(ctx);
+		const beforeRow = await findAuthUserRowById(ctx, args.userId);
 
 		const name = args.name.trim();
 		const email = args.email.trim().toLowerCase();
@@ -594,6 +829,22 @@ export const adminUpdateUser = mutation({
 			},
 		});
 
+		await insertAuditLog(ctx, {
+			action: "user.updated",
+			description: `Cập nhật thông tin người dùng ${email}`,
+			entityType: "user",
+			entityId: args.userId,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			before: buildAuditUserSnapshot(beforeRow),
+			after: {
+				...(buildAuditUserSnapshot(beforeRow) ?? {}),
+				id: args.userId,
+				name,
+				email,
+			},
+		});
+
 		return {
 			success: true,
 		};
@@ -606,9 +857,12 @@ export const adminDeleteUser = mutation({
 	},
 	handler: async (ctx, args) => {
 		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await resolveAdminState(ctx);
 		if (args.userId === adminUserId) {
 			throw new Error("Không thể tự xóa tài khoản admin đang đăng nhập");
 		}
+
+		const deletedUserRow = await findAuthUserRowById(ctx, args.userId);
 
 		const sessionRows = extractRowsFromAdapterResult(
 			await ctx.runQuery(components.betterAuth.adapter.findMany, {
@@ -747,6 +1001,16 @@ export const adminDeleteUser = mutation({
 		if (!configuredAdminUserIds.includes(args.userId)) {
 			runtimeAdminUserIds.delete(args.userId);
 		}
+
+		await insertAuditLog(ctx, {
+			action: "user.deleted",
+			description: `Xóa người dùng ${typeof deletedUserRow?.email === "string" ? deletedUserRow.email : args.userId}`,
+			entityType: "user",
+			entityId: args.userId,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			before: buildAuditUserSnapshot(deletedUserRow),
+		});
 
 		return {
 			success: true,
