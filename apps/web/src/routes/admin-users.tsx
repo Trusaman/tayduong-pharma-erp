@@ -113,6 +113,11 @@ const AUDIT_ENTITY_TYPE_OPTIONS = [
 	{ value: "all", label: "Tất cả phân hệ" },
 	{ value: "user", label: "Quản trị user" },
 	{ value: "customer", label: "Khách hàng" },
+	{ value: "employee", label: "Nhân viên" },
+	{ value: "salesOrder", label: "Đơn bán" },
+	{ value: "discount", label: "Chiết khấu" },
+	{ value: "discountCalculation", label: "Tính chiết khấu" },
+	{ value: "discountDebt", label: "Công nợ chiết khấu" },
 	{ value: "product", label: "Sản phẩm" },
 	{ value: "supplier", label: "Nhà cung cấp" },
 ] as const;
@@ -121,6 +126,11 @@ const AUDIT_ACTION_PREFIX_OPTIONS = [
 	{ value: "all", label: "Tất cả hành động" },
 	{ value: "user.", label: "Nhóm user" },
 	{ value: "customer.", label: "Nhóm khách hàng" },
+	{ value: "employee.", label: "Nhóm nhân viên" },
+	{ value: "salesOrder.", label: "Nhóm đơn bán" },
+	{ value: "discount.", label: "Nhóm chiết khấu" },
+	{ value: "discountCalculation.", label: "Nhóm tính chiết khấu" },
+	{ value: "discountDebt.", label: "Nhóm công nợ chiết khấu" },
 	{ value: "product.", label: "Nhóm sản phẩm" },
 	{ value: "supplier.", label: "Nhóm nhà cung cấp" },
 ] as const;
@@ -168,6 +178,48 @@ function formatAuditAction(action: string) {
 			return "Xóa khách hàng";
 		case "customer.imported":
 			return "Import khách hàng";
+		case "employee.created":
+			return "Tạo nhân viên";
+		case "employee.updated":
+			return "Sửa nhân viên";
+		case "employee.deleted":
+			return "Xóa nhân viên";
+		case "salesOrder.created":
+			return "Tạo đơn bán";
+		case "salesOrder.updated":
+			return "Sửa đơn bán";
+		case "salesOrder.status_changed":
+			return "Đổi trạng thái đơn bán";
+		case "salesOrder.fulfilled":
+			return "Giao hàng đơn bán";
+		case "salesOrder.deleted":
+			return "Xóa đơn bán";
+		case "discount.created":
+			return "Tạo chính sách chiết khấu";
+		case "discount.updated":
+			return "Sửa chính sách chiết khấu";
+		case "discount.deleted":
+			return "Xóa chính sách chiết khấu";
+		case "discount.imported":
+			return "Import chính sách chiết khấu";
+		case "discountCalculation.repaired":
+			return "Tính lại nguồn đơn chiết khấu";
+		case "discountCalculation.saved":
+			return "Lưu bảng tính chiết khấu";
+		case "discountCalculation.deleted":
+			return "Xóa bảng tính chiết khấu";
+		case "discountDebt.payment_recorded":
+			return "Ghi nhận thanh toán công nợ";
+		case "discountDebt.payment_updated":
+			return "Sửa thanh toán công nợ";
+		case "discountDebt.order_payment_recorded":
+			return "Ghi nhận thanh toán theo đơn";
+		case "discountDebt.order_payment_updated":
+			return "Sửa thanh toán theo đơn";
+		case "discountDebt.created":
+			return "Tạo công nợ chiết khấu";
+		case "discountDebt.deleted":
+			return "Xóa công nợ chiết khấu";
 		case "product.created":
 			return "Tạo sản phẩm";
 		case "product.updated":
@@ -191,6 +243,16 @@ function formatAuditEntityType(entityType: string | undefined) {
 			return "Quản trị user";
 		case "customer":
 			return "Khách hàng";
+		case "employee":
+			return "Nhân viên";
+		case "salesOrder":
+			return "Đơn bán";
+		case "discount":
+			return "Chiết khấu";
+		case "discountCalculation":
+			return "Tính chiết khấu";
+		case "discountDebt":
+			return "Công nợ chiết khấu";
 		case "product":
 			return "Sản phẩm";
 		case "supplier":
@@ -255,7 +317,6 @@ function AdminUsersPage() {
 		api.auth.adminListAuditLogs,
 		isCurrentUserAdmin && !isAuditRangeInvalid
 			? {
-					limit: 300,
 					fromTs: auditFromTs,
 					toTs: auditToTs,
 					entityType: auditEntityType === "all" ? undefined : auditEntityType,

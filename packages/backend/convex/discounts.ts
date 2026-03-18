@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
 
 const discountTypeValidator = v.union(
 	v.literal("Doctor"),
@@ -67,6 +68,28 @@ type DiscountDetail = {
 
 function normalizeLookupCode(value: string) {
 	return value.trim().toUpperCase();
+}
+
+function toDiscountRuleAuditSnapshot(
+	rule: Doc<"discountRules">,
+	id?: Id<"discountRules">,
+) {
+	return {
+		id: id ?? rule._id,
+		name: rule.name,
+		ruleGroupId: rule.ruleGroupId,
+		customerId: rule.customerId,
+		productId: rule.productId,
+		unitPrice: rule.unitPrice,
+		isActive: rule.isActive,
+		doctorDiscount: rule.doctorDiscount,
+		salesDiscount: rule.salesDiscount,
+		paymentDiscount: rule.paymentDiscount,
+		ctvDiscount: rule.ctvDiscount,
+		managerDiscount: rule.managerDiscount,
+		notes: rule.notes,
+		updatedAt: rule.updatedAt,
+	};
 }
 
 function parseImportNumber(value: string, fieldName: string) {
@@ -386,6 +409,7 @@ export const create = mutation({
 				.first();
 
 			if (existing) {
+				const beforeSnapshot = toDiscountRuleAuditSnapshot(existing);
 				const patch: Partial<typeof existing> & Record<string, unknown> = {
 					name: args.name,
 					customerId: args.customerId,
@@ -397,6 +421,23 @@ export const create = mutation({
 				};
 				patch[field] = detail;
 				await ctx.db.patch(existing._id, patch);
+
+				const updatedRule = await ctx.db.get(existing._id);
+				await writeAuditLog(ctx, {
+					action: AUDIT_ACTIONS.discountUpdated,
+					description: `Cập nhật chính sách chiết khấu ${args.name}`,
+					entityType: AUDIT_ENTITIES.discount,
+					entityId: existing._id,
+					before: beforeSnapshot,
+					after: updatedRule
+						? toDiscountRuleAuditSnapshot(updatedRule, existing._id)
+						: undefined,
+					metadata: {
+						upsertByRuleGroup: true,
+						discountType: args.discountType,
+					},
+				});
+
 				return existing._id;
 			}
 		}
@@ -415,7 +456,27 @@ export const create = mutation({
 		};
 		insertDoc[field] = detail;
 
-		return await ctx.db.insert("discountRules", insertDoc);
+		const ruleId = await ctx.db.insert("discountRules", insertDoc);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountCreated,
+			description: `Tạo chính sách chiết khấu ${args.name}`,
+			entityType: AUDIT_ENTITIES.discount,
+			entityId: ruleId,
+			after: {
+				id: ruleId,
+				name: args.name,
+				ruleGroupId,
+				discountType: args.discountType,
+				customerId: args.customerId,
+				productId: args.productId,
+				salesmanId: args.salesmanId,
+				discountPercent: detail.discountPercent,
+				unitPrice,
+			},
+		});
+
+		return ruleId;
 	},
 });
 
@@ -610,14 +671,43 @@ export const update = mutation({
 		}
 
 		await ctx.db.patch(id, patch);
-		return await ctx.db.get(id);
+		const updatedRule = await ctx.db.get(id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountUpdated,
+			description: `Cập nhật chính sách chiết khấu ${existing.name}`,
+			entityType: AUDIT_ENTITIES.discount,
+			entityId: id,
+			before: toDiscountRuleAuditSnapshot(existing),
+			after: updatedRule
+				? toDiscountRuleAuditSnapshot(updatedRule, id)
+				: undefined,
+			metadata: {
+				updatedByStaff: updatedByStaff?.trim() || undefined,
+				changedFieldsCount: changes.length,
+			},
+		});
+
+		return updatedRule;
 	},
 });
 
 export const remove = mutation({
 	args: { id: v.id("discountRules") },
 	handler: async (ctx, args) => {
+		const existing = await ctx.db.get(args.id);
 		await ctx.db.delete(args.id);
+
+		if (existing) {
+			await writeAuditLog(ctx, {
+				action: AUDIT_ACTIONS.discountDeleted,
+				description: `Xóa chính sách chiết khấu ${existing.name}`,
+				entityType: AUDIT_ENTITIES.discount,
+				entityId: args.id,
+				before: toDiscountRuleAuditSnapshot(existing, args.id),
+			});
+		}
+
 		return { success: true };
 	},
 });
@@ -626,9 +716,25 @@ export const removeMany = mutation({
 	args: { ids: v.array(v.id("discountRules")) },
 	handler: async (ctx, args) => {
 		const uniqueIds = [...new Set(args.ids)];
+		const removedRules: Array<{ id: Id<"discountRules">; name: string }> = [];
 		for (const id of uniqueIds) {
+			const existing = await ctx.db.get(id);
 			await ctx.db.delete(id);
+			if (existing) {
+				removedRules.push({ id, name: existing.name });
+			}
 		}
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDeleted,
+			description: `Xóa hàng loạt ${removedRules.length} chính sách chiết khấu`,
+			entityType: AUDIT_ENTITIES.discount,
+			metadata: {
+				count: removedRules.length,
+				rules: removedRules,
+			},
+		});
+
 		return { success: true, removedCount: uniqueIds.length };
 	},
 });
@@ -864,6 +970,16 @@ export const importMany = mutation({
 			});
 			if (!prepared.isActive) inactiveCount += 1;
 		}
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountImported,
+			description: `Import ${preparedRows.length} chính sách chiết khấu`,
+			entityType: AUDIT_ENTITIES.discount,
+			metadata: {
+				createdCount: preparedRows.length,
+				inactiveCount,
+			},
+		});
 
 		return {
 			success: true,

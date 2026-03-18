@@ -1,6 +1,7 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
 
 const positionValidator = v.union(
 	v.literal("thử việc"),
@@ -117,6 +118,25 @@ async function attachEmployeeImageUrls<
 	};
 }
 
+function toEmployeeAuditSnapshot(
+	employee: Doc<"employees">,
+	id?: Id<"employees">,
+) {
+	return {
+		id: id ?? employee._id,
+		employeeCode: employee.employeeCode,
+		name: employee.name,
+		email: employee.email,
+		phone: employee.phone,
+		department: employee.department,
+		position: employee.position,
+		trackingStatus: employee.trackingStatus,
+		joinedDate: employee.joinedDate,
+		resignationDate: employee.resignationDate,
+		updatedAt: employee.updatedAt,
+	};
+}
+
 export const list = query({
 	args: {
 		trackingStatus: v.optional(trackingStatusValidator),
@@ -199,7 +219,7 @@ export const create = mutation({
 					"identity-card",
 				)
 			: undefined;
-		return await ctx.db.insert("employees", {
+		const employeeId = await ctx.db.insert("employees", {
 			portraitImage,
 			identityCardImage,
 			employeeCode: args.employeeCode,
@@ -230,6 +250,25 @@ export const create = mutation({
 			createdAt: now,
 			updatedAt: now,
 		});
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.employeeCreated,
+			description: `Tạo nhân viên ${args.employeeCode ?? args.name}`,
+			entityType: AUDIT_ENTITIES.employee,
+			entityId: employeeId,
+			after: {
+				id: employeeId,
+				employeeCode: args.employeeCode,
+				name: args.name,
+				email: args.email,
+				phone: args.phone,
+				position: args.position,
+				trackingStatus: args.trackingStatus,
+				joinedDate: args.joinedDate,
+			},
+		});
+
+		return employeeId;
 	},
 });
 
@@ -329,6 +368,7 @@ export const update = mutation({
 		}
 
 		await ctx.db.patch(id, patchData);
+		const updatedEmployee = await ctx.db.get(id);
 
 		if (shouldDeletePortraitAfterPatch) {
 			await deleteEmployeeImageIfNeeded(ctx, existing.portraitImage);
@@ -337,6 +377,17 @@ export const update = mutation({
 		if (shouldDeleteIdentityAfterPatch) {
 			await deleteEmployeeImageIfNeeded(ctx, existing.identityCardImage);
 		}
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.employeeUpdated,
+			description: `Cập nhật nhân viên ${updatedEmployee?.employeeCode ?? existing.employeeCode ?? existing.name}`,
+			entityType: AUDIT_ENTITIES.employee,
+			entityId: id,
+			before: toEmployeeAuditSnapshot(existing),
+			after: updatedEmployee
+				? toEmployeeAuditSnapshot(updatedEmployee, id)
+				: undefined,
+		});
 	},
 });
 
@@ -348,5 +399,13 @@ export const remove = mutation({
 		await ctx.db.delete(args.id);
 		await deleteEmployeeImageIfNeeded(ctx, existing.portraitImage);
 		await deleteEmployeeImageIfNeeded(ctx, existing.identityCardImage);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.employeeDeleted,
+			description: `Xóa nhân viên ${existing.employeeCode ?? existing.name}`,
+			entityType: AUDIT_ENTITIES.employee,
+			entityId: args.id,
+			before: toEmployeeAuditSnapshot(existing, args.id),
+		});
 	},
 });

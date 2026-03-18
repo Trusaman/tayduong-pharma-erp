@@ -566,10 +566,12 @@ export const adminListAuditLogs = query({
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
 
-		const paginationLimit =
-			typeof args.limit === "number" && args.limit > 0
-				? Math.min(Math.floor(args.limit), 300)
-				: 100;
+		const requestedLimit =
+			typeof args.limit === "number" &&
+			Number.isFinite(args.limit) &&
+			args.limit > 0
+				? Math.floor(args.limit)
+				: undefined;
 
 		const fromTs =
 			typeof args.fromTs === "number" && Number.isFinite(args.fromTs)
@@ -608,10 +610,7 @@ export const adminListAuditLogs = query({
 			return ctx.db.query("auditLogs").withIndex("by_createdAt");
 		})();
 
-		const logs =
-			args.entityType || args.actionPrefix
-				? await logsQuery.order("desc").collect()
-				: await logsQuery.order("desc").take(paginationLimit);
+		const logs = await logsQuery.order("desc").collect();
 		const entityTypeFilter = args.entityType?.trim().toLowerCase();
 		const actionPrefixFilter = args.actionPrefix?.trim().toLowerCase();
 
@@ -633,7 +632,12 @@ export const adminListAuditLogs = query({
 			return true;
 		});
 
-		return filteredLogs.slice(0, paginationLimit).map((item) => ({
+		const resultLogs =
+			requestedLimit !== undefined
+				? filteredLogs.slice(0, requestedLimit)
+				: filteredLogs;
+
+		return resultLogs.map((item) => ({
 			id: item._id,
 			action: item.action,
 			description: item.description,

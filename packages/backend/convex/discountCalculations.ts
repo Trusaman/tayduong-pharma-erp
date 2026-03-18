@@ -6,6 +6,7 @@ import {
 	type QueryCtx,
 	query,
 } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
 import {
 	allocateDiscountBreakdown,
 	getMatchingRuleDiscounts,
@@ -602,6 +603,29 @@ async function ensureReplaceableCalculation(
 			await ctx.db.delete(payment._id);
 		}
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDebtDeleted,
+			description: `Xóa công nợ chiết khấu kỳ ${debt.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountDebt,
+			entityId: debt._id,
+			before: {
+				periodKey: debt.periodKey,
+				month: debt.month,
+				year: debt.year,
+				salesmanId: debt.salesmanId,
+				salesmanNameSnapshot: debt.salesmanNameSnapshot,
+				totalDebtAmount: debt.totalDebtAmount,
+				paidAmount: debt.paidAmount,
+				remainingAmount: debt.remainingAmount,
+				paymentStatus: debt.paymentStatus,
+			},
+			metadata: {
+				reason: "replace_monthly_calculation",
+				deletedLegacyPaymentCount: legacyPayments.length,
+				deletedOrderPaymentCount: orderPayments.length,
+			},
+		});
+
 		await ctx.db.delete(debt._id);
 	}
 }
@@ -755,6 +779,21 @@ export const repairMonthlySourceOrders = mutation({
 			createdAt: now,
 		});
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountCalculationRepaired,
+			description: `Tính lại nguồn đơn chiết khấu tháng ${period.month}/${period.year}`,
+			entityType: AUDIT_ENTITIES.discountCalculation,
+			entityId: period.periodKey,
+			metadata: {
+				periodKey: period.periodKey,
+				recalculatedBy,
+				completedOrderCount: completedOrders.length,
+				repairedOrderCount,
+				repairedItemCount,
+				repairedOrderNumbers,
+			},
+		});
+
 		return {
 			periodKey: period.periodKey,
 			recalculatedBy,
@@ -806,6 +845,7 @@ export const saveMonthly = mutation({
 
 		const now = Date.now();
 		let calculationId = preview.existingCalculation?._id;
+		const replacingExisting = Boolean(calculationId);
 
 		if (calculationId) {
 			await ensureReplaceableCalculation(ctx, calculationId);
@@ -872,7 +912,7 @@ export const saveMonthly = mutation({
 		}
 
 		for (const recipient of preview.recipients) {
-			await ctx.db.insert("employeeDiscountDebts", {
+			const debtId = await ctx.db.insert("employeeDiscountDebts", {
 				calculationId,
 				periodKey: preview.period.periodKey,
 				month: preview.period.month,
@@ -887,7 +927,42 @@ export const saveMonthly = mutation({
 				createdAt: now,
 				updatedAt: now,
 			});
+
+			await writeAuditLog(ctx, {
+				action: AUDIT_ACTIONS.discountDebtCreated,
+				description: `Tạo công nợ chiết khấu kỳ ${preview.period.periodKey}`,
+				entityType: AUDIT_ENTITIES.discountDebt,
+				entityId: debtId,
+				after: {
+					id: debtId,
+					calculationId,
+					periodKey: preview.period.periodKey,
+					month: preview.period.month,
+					year: preview.period.year,
+					salesmanId: recipient.salesmanId,
+					salesmanNameSnapshot: recipient.salesmanName,
+					totalDebtAmount: recipient.totalDiscountAmount,
+					paidAmount: 0,
+					remainingAmount: recipient.totalDiscountAmount,
+					paymentStatus: "unpaid",
+				},
+			});
 		}
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountCalculationSaved,
+			description: `Lưu bảng tính chiết khấu tháng ${preview.period.month}/${preview.period.year}`,
+			entityType: AUDIT_ENTITIES.discountCalculation,
+			entityId: calculationId,
+			metadata: {
+				periodKey: preview.period.periodKey,
+				replacingExisting,
+				savedBy,
+				entryCount: preview.totals.entryCount,
+				recipientCount: preview.totals.recipientCount,
+				totalDiscountAmount: preview.totals.totalDiscountAmount,
+			},
+		});
 
 		return {
 			calculationId,
@@ -1046,6 +1121,31 @@ export const recordDebtPayment = mutation({
 			updatedAt: now,
 		});
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDebtPaymentRecorded,
+			description: `Ghi nhận thanh toán công nợ chiết khấu kỳ ${debt.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountDebt,
+			entityId: debt._id,
+			before: {
+				paidAmount: debt.paidAmount,
+				remainingAmount: debt.remainingAmount,
+				paymentStatus: debt.paymentStatus,
+				lastPaidAt: debt.lastPaidAt,
+			},
+			after: {
+				paidAmount,
+				remainingAmount: roundMoney(debt.totalDebtAmount - paidAmount),
+				paymentStatus: paymentSummary.paymentStatus,
+				lastPaidAt: Math.max(debt.lastPaidAt ?? 0, args.paymentDate),
+			},
+			metadata: {
+				paymentId,
+				amount,
+				paymentDate: args.paymentDate,
+				paidBy,
+			},
+		});
+
 		return {
 			paymentId,
 			paidAmount,
@@ -1122,6 +1222,34 @@ export const updateDebtPayment = mutation({
 			paymentStatus: paymentSummary.paymentStatus,
 			lastPaidAt: paymentSummary.lastPaidAt,
 			updatedAt: now,
+		});
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDebtPaymentUpdated,
+			description: `Cập nhật thanh toán công nợ chiết khấu kỳ ${debt.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountDebt,
+			entityId: debt._id,
+			before: {
+				paymentId: payment._id,
+				amount: payment.amount,
+				paymentDate: payment.paymentDate,
+				paidBy: payment.paidBy,
+				paidAmount: debt.paidAmount,
+				remainingAmount: debt.remainingAmount,
+				paymentStatus: debt.paymentStatus,
+			},
+			after: {
+				paymentId: payment._id,
+				amount,
+				paymentDate: args.paymentDate,
+				paidBy,
+				paidAmount: paymentSummary.paidAmount,
+				remainingAmount: paymentSummary.remainingAmount,
+				paymentStatus: paymentSummary.paymentStatus,
+			},
+			metadata: {
+				notes: args.notes?.trim() ? args.notes.trim() : undefined,
+			},
 		});
 
 		return {
@@ -1384,6 +1512,31 @@ export const recordDebtOrderPayment = mutation({
 
 		const paymentSummary = await recomputeDebtFromOrderPayments(ctx, debt, now);
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDebtOrderPaymentRecorded,
+			description: `Ghi nhận thanh toán theo đơn cho công nợ chiết khấu kỳ ${debt.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountDebt,
+			entityId: debt._id,
+			before: {
+				paidAmount: debt.paidAmount,
+				remainingAmount: debt.remainingAmount,
+				paymentStatus: debt.paymentStatus,
+			},
+			after: {
+				paidAmount: paymentSummary.paidAmount,
+				remainingAmount: paymentSummary.remainingAmount,
+				paymentStatus: paymentSummary.paymentStatus,
+			},
+			metadata: {
+				paymentId,
+				salesOrderId: args.salesOrderId,
+				orderNumber: selectedEntries[0].orderNumber,
+				amount,
+				paymentDate: args.paymentDate,
+				paidBy,
+			},
+		});
+
 		return {
 			paymentId,
 			paidAmount: paymentSummary.paidAmount,
@@ -1481,6 +1634,36 @@ export const updateDebtOrderPayment = mutation({
 
 		const paymentSummary = await recomputeDebtFromOrderPayments(ctx, debt, now);
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountDebtOrderPaymentUpdated,
+			description: `Cập nhật thanh toán theo đơn cho công nợ chiết khấu kỳ ${debt.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountDebt,
+			entityId: debt._id,
+			before: {
+				paymentId: payment._id,
+				salesOrderId: payment.salesOrderId,
+				amount: payment.amount,
+				paymentDate: payment.paymentDate,
+				paidBy: payment.paidBy,
+				paidAmount: debt.paidAmount,
+				remainingAmount: debt.remainingAmount,
+				paymentStatus: debt.paymentStatus,
+			},
+			after: {
+				paymentId: payment._id,
+				salesOrderId: payment.salesOrderId,
+				amount,
+				paymentDate: args.paymentDate,
+				paidBy,
+				paidAmount: paymentSummary.paidAmount,
+				remainingAmount: paymentSummary.remainingAmount,
+				paymentStatus: paymentSummary.paymentStatus,
+			},
+			metadata: {
+				notes: args.notes?.trim() ? args.notes.trim() : undefined,
+			},
+		});
+
 		return {
 			paymentId: payment._id,
 			paidAmount: paymentSummary.paidAmount,
@@ -1527,6 +1710,29 @@ export const deleteMonthlyCalculation = mutation({
 				await ctx.db.delete(payment._id);
 			}
 
+			await writeAuditLog(ctx, {
+				action: AUDIT_ACTIONS.discountDebtDeleted,
+				description: `Xóa công nợ chiết khấu kỳ ${debt.periodKey}`,
+				entityType: AUDIT_ENTITIES.discountDebt,
+				entityId: debt._id,
+				before: {
+					periodKey: debt.periodKey,
+					month: debt.month,
+					year: debt.year,
+					salesmanId: debt.salesmanId,
+					salesmanNameSnapshot: debt.salesmanNameSnapshot,
+					totalDebtAmount: debt.totalDebtAmount,
+					paidAmount: debt.paidAmount,
+					remainingAmount: debt.remainingAmount,
+					paymentStatus: debt.paymentStatus,
+				},
+				metadata: {
+					reason: "delete_monthly_calculation",
+					deletedLegacyPaymentCount: legacyPayments.length,
+					deletedOrderPaymentCount: orderPayments.length,
+				},
+			});
+
 			await ctx.db.delete(debt._id);
 		}
 
@@ -1535,6 +1741,25 @@ export const deleteMonthlyCalculation = mutation({
 		}
 
 		await ctx.db.delete(calculation._id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.discountCalculationDeleted,
+			description: `Xóa bảng tính chiết khấu kỳ ${calculation.periodKey}`,
+			entityType: AUDIT_ENTITIES.discountCalculation,
+			entityId: calculation._id,
+			before: {
+				periodKey: calculation.periodKey,
+				month: calculation.month,
+				year: calculation.year,
+				totalDiscountAmount: calculation.totalDiscountAmount,
+				entryCount: calculation.entryCount,
+				recipientCount: calculation.recipientCount,
+			},
+			metadata: {
+				deletedEntryCount: entries.length,
+				deletedDebtCount: debts.length,
+			},
+		});
 
 		return {
 			calculationId: calculation._id,

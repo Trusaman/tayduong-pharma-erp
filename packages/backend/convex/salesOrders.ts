@@ -1,6 +1,7 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
 import {
 	allocateDiscountBreakdown,
 	getMatchingRuleDiscounts,
@@ -148,6 +149,24 @@ function areSalesOrderItemsEquivalent(
 	return normalizeExisting.every(
 		(item, index) => item === normalizeNext[index],
 	);
+}
+
+function toSalesOrderAuditSnapshot(
+	order: Doc<"salesOrders">,
+	id?: Id<"salesOrders">,
+) {
+	return {
+		id: id ?? order._id,
+		orderNumber: order.orderNumber,
+		customerId: order.customerId,
+		salesmanId: order.salesmanId,
+		status: order.status,
+		totalAmount: order.totalAmount,
+		totalDiscountAmount: order.totalDiscountAmount,
+		orderDate: order.orderDate,
+		notes: order.notes,
+		updatedAt: order.updatedAt,
+	};
 }
 
 // Generate order number
@@ -337,7 +356,22 @@ export const create = mutation({
 			});
 		}
 
-		return await ctx.db.get(orderId);
+		const createdOrder = await ctx.db.get(orderId);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.salesOrderCreated,
+			description: `Tạo đơn bán ${orderNumber}`,
+			entityType: AUDIT_ENTITIES.salesOrder,
+			entityId: orderId,
+			after: createdOrder
+				? toSalesOrderAuditSnapshot(createdOrder, orderId)
+				: undefined,
+			metadata: {
+				itemCount: preparedItems.length,
+			},
+		});
+
+		return createdOrder;
 	},
 });
 
@@ -441,8 +475,25 @@ export const update = mutation({
 					},
 				],
 			});
+			const updatedOrder = await ctx.db.get(args.id);
 
-			return await ctx.db.get(args.id);
+			await writeAuditLog(ctx, {
+				action: AUDIT_ACTIONS.salesOrderUpdated,
+				description: `Cập nhật ghi chú đơn bán ${order.orderNumber}`,
+				entityType: AUDIT_ENTITIES.salesOrder,
+				entityId: args.id,
+				before: toSalesOrderAuditSnapshot(order, args.id),
+				after: updatedOrder
+					? toSalesOrderAuditSnapshot(updatedOrder, args.id)
+					: undefined,
+				metadata: {
+					onlyNotesChanged: true,
+					editorName,
+					changes,
+				},
+			});
+
+			return updatedOrder;
 		}
 
 		pushChange(
@@ -529,7 +580,25 @@ export const update = mutation({
 			});
 		}
 
-		return await ctx.db.get(args.id);
+		const updatedOrder = await ctx.db.get(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.salesOrderUpdated,
+			description: `Cập nhật đơn bán ${order.orderNumber}`,
+			entityType: AUDIT_ENTITIES.salesOrder,
+			entityId: args.id,
+			before: toSalesOrderAuditSnapshot(order, args.id),
+			after: updatedOrder
+				? toSalesOrderAuditSnapshot(updatedOrder, args.id)
+				: undefined,
+			metadata: {
+				editorName,
+				changes,
+				itemCount: preparedItems.length,
+			},
+		});
+
+		return updatedOrder;
 	},
 });
 
@@ -575,7 +644,31 @@ export const updateStatus = mutation({
 			createdAt: now,
 		});
 
-		return await ctx.db.get(args.id);
+		const updatedOrder = await ctx.db.get(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.salesOrderStatusChanged,
+			description: `Đổi trạng thái đơn ${order.orderNumber}: ${order.status} -> ${args.status}`,
+			entityType: AUDIT_ENTITIES.salesOrder,
+			entityId: args.id,
+			before: {
+				status: order.status,
+				deliveryEmployeeId: order.deliveryEmployeeId,
+			},
+			after: {
+				status: args.status,
+				deliveryEmployeeId:
+					updatedOrder?.deliveryEmployeeId ??
+					args.deliveryEmployeeId ??
+					order.deliveryEmployeeId,
+			},
+			metadata: {
+				changedByName: args.changedByName,
+				comment: args.comment,
+			},
+		});
+
+		return updatedOrder;
 	},
 });
 
@@ -651,7 +744,30 @@ export const fulfillItems = mutation({
 			updatedAt: now,
 		});
 
-		return await ctx.db.get(args.salesOrderId);
+		const updatedOrder = await ctx.db.get(args.salesOrderId);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.salesOrderFulfilled,
+			description: `Giao hàng đơn ${order.orderNumber}`,
+			entityType: AUDIT_ENTITIES.salesOrder,
+			entityId: args.salesOrderId,
+			before: {
+				status: order.status,
+				completedAt: order.completedAt,
+			},
+			after: updatedOrder
+				? {
+						status: updatedOrder.status,
+						completedAt: updatedOrder.completedAt,
+					}
+				: undefined,
+			metadata: {
+				itemFulfillments: args.items,
+				fullyFulfilled,
+			},
+		});
+
+		return updatedOrder;
 	},
 });
 
@@ -681,6 +797,19 @@ export const remove = mutation({
 		}
 
 		await ctx.db.delete(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.salesOrderDeleted,
+			description: `Xóa đơn bán ${order.orderNumber}`,
+			entityType: AUDIT_ENTITIES.salesOrder,
+			entityId: args.id,
+			before: toSalesOrderAuditSnapshot(order, args.id),
+			metadata: {
+				itemCount: items.length,
+				statusLogCount: statusLogs.length,
+			},
+		});
+
 		return { success: true };
 	},
 });
