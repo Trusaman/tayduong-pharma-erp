@@ -451,11 +451,43 @@ export const isCurrentUserAdmin = query({
 export const bootstrapAdminRole = mutation({
 	args: {},
 	handler: async (ctx) => {
-		const adminUserId = await requireAdminUserId(ctx);
+		const adminState = await requireAdmin(ctx);
+		const adminUserId = adminState.userId;
+		if (!adminUserId) {
+			throw new Error("ADMIN_ROLE_OVERRIDE_MISSING");
+		}
+
+		runtimeAdminUserIds.add(adminUserId);
+		const userRow = await findAuthUserRowById(ctx, adminUserId);
+		const roleOverride = await ctx.db
+			.query("authUserRoles")
+			.withIndex("by_userId", (query) => query.eq("userId", adminUserId))
+			.first();
+		const previousRole = roleOverride?.role ?? extractRoleFromUserRow(userRow);
+
 		await setRoleOverride(ctx, {
 			userId: adminUserId,
 			role: "admin",
 			updatedBy: adminUserId,
+		});
+
+		await insertAuditLog(ctx, {
+			action: "user.bootstrap_admin",
+			description: `Thiết lập quyền admin mặc định cho ${adminState.email ?? adminUserId}`,
+			entityType: "user",
+			entityId: adminUserId,
+			actorUserId: adminUserId,
+			actorEmail: adminState.email,
+			before: {
+				role: previousRole,
+			},
+			after: {
+				role: "admin",
+			},
+			metadata: {
+				reason: "admin_role_bootstrap",
+				target: buildAuditUserSnapshot(userRow),
+			},
 		});
 
 		return {

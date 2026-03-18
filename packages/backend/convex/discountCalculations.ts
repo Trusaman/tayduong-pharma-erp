@@ -88,6 +88,41 @@ type SalesOrderItemPreview = {
 
 type PeriodRange = ReturnType<typeof getPeriodRange>;
 
+function toMonthlyCalculationAuditSnapshot(
+	calculation: {
+		_id: Id<"monthlyDiscountCalculations">;
+		periodKey: string;
+		month: number;
+		year: number;
+		startDate: number;
+		endDate: number;
+		orderCount: number;
+		entryCount: number;
+		recipientCount: number;
+		totalDiscountAmount: number;
+		savedBy: string;
+		notes?: string;
+		updatedAt: number;
+	},
+	id?: Id<"monthlyDiscountCalculations">,
+) {
+	return {
+		id: id ?? calculation._id,
+		periodKey: calculation.periodKey,
+		month: calculation.month,
+		year: calculation.year,
+		startDate: calculation.startDate,
+		endDate: calculation.endDate,
+		orderCount: calculation.orderCount,
+		entryCount: calculation.entryCount,
+		recipientCount: calculation.recipientCount,
+		totalDiscountAmount: calculation.totalDiscountAmount,
+		savedBy: calculation.savedBy,
+		hasNotes: Boolean(calculation.notes?.trim()),
+		updatedAt: calculation.updatedAt,
+	};
+}
+
 function getPeriodRange(month: number, year: number) {
 	if (!Number.isInteger(month) || month < 1 || month > 12) {
 		throw new ConvexError({ message: "Tháng không hợp lệ" });
@@ -846,6 +881,9 @@ export const saveMonthly = mutation({
 		const now = Date.now();
 		let calculationId = preview.existingCalculation?._id;
 		const replacingExisting = Boolean(calculationId);
+		const beforeCalculationSnapshot = preview.existingCalculation
+			? toMonthlyCalculationAuditSnapshot(preview.existingCalculation)
+			: undefined;
 
 		if (calculationId) {
 			await ensureReplaceableCalculation(ctx, calculationId);
@@ -949,11 +987,17 @@ export const saveMonthly = mutation({
 			});
 		}
 
+		const persistedCalculation = await ctx.db.get(calculationId);
+
 		await writeAuditLog(ctx, {
 			action: AUDIT_ACTIONS.discountCalculationSaved,
 			description: `Lưu bảng tính chiết khấu tháng ${preview.period.month}/${preview.period.year}`,
 			entityType: AUDIT_ENTITIES.discountCalculation,
 			entityId: calculationId,
+			before: beforeCalculationSnapshot,
+			after: persistedCalculation
+				? toMonthlyCalculationAuditSnapshot(persistedCalculation, calculationId)
+				: undefined,
 			metadata: {
 				periodKey: preview.period.periodKey,
 				replacingExisting,

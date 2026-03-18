@@ -58,6 +58,14 @@ export const AUDIT_ACTIONS = {
 	supplierDeleted: "supplier.deleted",
 } as const;
 
+const ENTITIES_REQUIRING_AUTHORIZED_ACTOR = new Set<string>([
+	AUDIT_ENTITIES.employee,
+	AUDIT_ENTITIES.salesOrder,
+	AUDIT_ENTITIES.discount,
+	AUDIT_ENTITIES.discountCalculation,
+	AUDIT_ENTITIES.discountDebt,
+]);
+
 function normalizeIdValue(value: unknown) {
 	if (typeof value === "string" && value.trim().length > 0) {
 		return value;
@@ -170,6 +178,15 @@ export async function writeAuditLog(
 					actorUserId: payload.actorUserId,
 					actorEmail: payload.actorEmail ?? undefined,
 				};
+
+	if (
+		ENTITIES_REQUIRING_AUTHORIZED_ACTOR.has(payload.entityType) &&
+		!actor.actorUserId
+	) {
+		throw new Error(
+			"Không xác định được tài khoản thực hiện thao tác để ghi nhật ký thay đổi",
+		);
+	}
 
 	await ctx.db.insert("auditLogs", {
 		action: payload.action,

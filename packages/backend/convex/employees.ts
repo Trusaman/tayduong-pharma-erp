@@ -122,6 +122,19 @@ function toEmployeeAuditSnapshot(
 	employee: Doc<"employees">,
 	id?: Id<"employees">,
 ) {
+	const maskLastFour = (value: string | undefined) => {
+		const trimmed = value?.trim();
+		if (!trimmed) {
+			return undefined;
+		}
+
+		const normalized = trimmed.replace(/\s+/g, "");
+		const suffix = normalized.slice(-4);
+		return suffix.length > 0 ? `***${suffix}` : undefined;
+	};
+
+	const notes = employee.notes?.trim();
+
 	return {
 		id: id ?? employee._id,
 		employeeCode: employee.employeeCode,
@@ -133,6 +146,17 @@ function toEmployeeAuditSnapshot(
 		trackingStatus: employee.trackingStatus,
 		joinedDate: employee.joinedDate,
 		resignationDate: employee.resignationDate,
+		hasPortraitImage: Boolean(employee.portraitImage),
+		hasIdentityCardImage: Boolean(employee.identityCardImage),
+		bankAccountCount: employee.bankAccounts?.length ?? 0,
+		identityNumberMasked: maskLastFour(employee.identityNumber),
+		passportNumberMasked: maskLastFour(employee.passportNumber),
+		taxIdMasked: maskLastFour(employee.taxId),
+		hasAgreedSalary: typeof employee.agreedSalary === "number",
+		hasSalaryCoefficient: typeof employee.salaryCoefficient === "number",
+		hasInsuranceSalary: typeof employee.insuranceSalary === "number",
+		hasNotes: Boolean(notes),
+		notesLength: notes?.length ?? 0,
 		updatedAt: employee.updatedAt,
 	};
 }

@@ -135,6 +135,19 @@ const AUDIT_ACTION_PREFIX_OPTIONS = [
 	{ value: "supplier.", label: "Nhóm nhà cung cấp" },
 ] as const;
 
+const auditEntityTypeLabelByValue = new Map(
+	AUDIT_ENTITY_TYPE_OPTIONS.map((option) => [option.value, option.label]),
+);
+
+const auditActionPrefixLabelByValue = new Map(
+	AUDIT_ACTION_PREFIX_OPTIONS.map((option) => [option.value, option.label]),
+);
+
+type AuditEntityTypeFilter =
+	(typeof AUDIT_ENTITY_TYPE_OPTIONS)[number]["value"];
+type AuditActionPrefixFilter =
+	(typeof AUDIT_ACTION_PREFIX_OPTIONS)[number]["value"];
+
 type UserRole = "admin" | "user";
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -170,6 +183,8 @@ function formatAuditAction(action: string) {
 			return "Đổi quyền";
 		case "user.password_changed":
 			return "Đổi mật khẩu";
+		case "user.bootstrap_admin":
+			return "Thiết lập admin mặc định";
 		case "customer.created":
 			return "Tạo khách hàng";
 		case "customer.updated":
@@ -281,6 +296,10 @@ function getDateFilterTimestamp(value: string, boundary: "start" | "end") {
 		: new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
 }
 
+function shouldRetryByBootstrappingAdmin(message: string) {
+	return message.includes("ADMIN_ROLE_OVERRIDE_MISSING");
+}
+
 function AdminUsersPage() {
 	const isCurrentUserAdmin = useQuery(api.auth.isCurrentUserAdmin);
 	const bootstrapAdminRole = useMutation(api.auth.bootstrapAdminRole);
@@ -296,8 +315,10 @@ function AdminUsersPage() {
 	);
 	const [auditFromDate, setAuditFromDate] = useState("");
 	const [auditToDate, setAuditToDate] = useState("");
-	const [auditEntityType, setAuditEntityType] = useState<string>("all");
-	const [auditActionPrefix, setAuditActionPrefix] = useState<string>("all");
+	const [auditEntityType, setAuditEntityType] =
+		useState<AuditEntityTypeFilter>("all");
+	const [auditActionPrefix, setAuditActionPrefix] =
+		useState<AuditActionPrefixFilter>("all");
 	const [isExportingAuditLogs, setIsExportingAuditLogs] = useState(false);
 
 	const auditFromTs = useMemo(
@@ -312,6 +333,14 @@ function AdminUsersPage() {
 		auditFromTs !== undefined &&
 		auditToTs !== undefined &&
 		auditFromTs > auditToTs;
+	const selectedAuditEntityTypeLabel =
+		auditEntityTypeLabelByValue.get(auditEntityType) ??
+		auditEntityTypeLabelByValue.get("all") ??
+		"Tất cả phân hệ";
+	const selectedAuditActionPrefixLabel =
+		auditActionPrefixLabelByValue.get(auditActionPrefix) ??
+		auditActionPrefixLabelByValue.get("all") ??
+		"Tất cả hành động";
 
 	const auditLogs = useQuery(
 		api.auth.adminListAuditLogs,
@@ -372,7 +401,7 @@ function AdminUsersPage() {
 						error,
 						"Không thể tải danh sách người dùng",
 					);
-					if (allowRetry) {
+					if (allowRetry && shouldRetryByBootstrappingAdmin(message)) {
 						try {
 							await bootstrapAdminRole({});
 							await runLoadUsers(false);
@@ -988,10 +1017,14 @@ function AdminUsersPage() {
 								<Label className="text-xs">Phân hệ</Label>
 								<Select
 									value={auditEntityType}
-									onValueChange={(value) => setAuditEntityType(value ?? "all")}
+									onValueChange={(value) =>
+										setAuditEntityType(
+											(value ?? "all") as AuditEntityTypeFilter,
+										)
+									}
 								>
 									<SelectTrigger className="w-full sm:w-44">
-										<SelectValue />
+										<SelectValue>{selectedAuditEntityTypeLabel}</SelectValue>
 									</SelectTrigger>
 									<SelectContent>
 										{AUDIT_ENTITY_TYPE_OPTIONS.map((option) => (
@@ -1007,11 +1040,13 @@ function AdminUsersPage() {
 								<Select
 									value={auditActionPrefix}
 									onValueChange={(value) =>
-										setAuditActionPrefix(value ?? "all")
+										setAuditActionPrefix(
+											(value ?? "all") as AuditActionPrefixFilter,
+										)
 									}
 								>
 									<SelectTrigger className="w-full sm:w-44">
-										<SelectValue />
+										<SelectValue>{selectedAuditActionPrefixLabel}</SelectValue>
 									</SelectTrigger>
 									<SelectContent>
 										{AUDIT_ACTION_PREFIX_OPTIONS.map((option) => (

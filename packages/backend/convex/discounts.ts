@@ -721,7 +721,20 @@ export const removeMany = mutation({
 			const existing = await ctx.db.get(id);
 			await ctx.db.delete(id);
 			if (existing) {
-				removedRules.push({ id, name: existing.name });
+				removedRules.push({
+					id,
+					name: existing.name,
+				});
+				await writeAuditLog(ctx, {
+					action: AUDIT_ACTIONS.discountDeleted,
+					description: `Xóa chính sách chiết khấu ${existing.name}`,
+					entityType: AUDIT_ENTITIES.discount,
+					entityId: id,
+					before: toDiscountRuleAuditSnapshot(existing, id),
+					metadata: {
+						bulkDelete: true,
+					},
+				});
 			}
 		}
 
@@ -731,7 +744,10 @@ export const removeMany = mutation({
 			entityType: AUDIT_ENTITIES.discount,
 			metadata: {
 				count: removedRules.length,
-				rules: removedRules,
+				rules: removedRules.map((rule) => ({
+					id: rule.id,
+					name: rule.name,
+				})),
 			},
 		});
 
