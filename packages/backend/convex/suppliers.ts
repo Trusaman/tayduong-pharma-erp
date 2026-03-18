@@ -1,5 +1,24 @@
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
+import { requireCurrentUserAdmin } from "./auth";
+
+function toSupplierAuditSnapshot(
+	supplier: Doc<"suppliers">,
+	id?: Id<"suppliers">,
+) {
+	return {
+		id: id ?? supplier._id,
+		code: supplier.code,
+		name: supplier.name,
+		contactPerson: supplier.contactPerson,
+		email: supplier.email,
+		phone: supplier.phone,
+		isActive: supplier.isActive,
+		updatedAt: supplier.updatedAt,
+	};
+}
 
 export const list = query({
 	args: { activeOnly: v.optional(v.boolean()) },
@@ -44,6 +63,8 @@ export const create = mutation({
 		notes: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		// Check if code already exists
 		const existing = await ctx.db
 			.query("suppliers")
@@ -55,7 +76,7 @@ export const create = mutation({
 		}
 
 		const now = Date.now();
-		return await ctx.db.insert("suppliers", {
+		const createdSupplierId = await ctx.db.insert("suppliers", {
 			name: args.name,
 			code: args.code,
 			contactPerson: args.contactPerson,
@@ -68,6 +89,21 @@ export const create = mutation({
 			createdAt: now,
 			updatedAt: now,
 		});
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.supplierCreated,
+			description: `Tạo nhà cung cấp ${args.code}`,
+			entityType: AUDIT_ENTITIES.supplier,
+			entityId: createdSupplierId,
+			after: {
+				id: createdSupplierId,
+				name: args.name,
+				code: args.code,
+				isActive: true,
+			},
+		});
+
+		return createdSupplierId;
 	},
 });
 
@@ -85,14 +121,17 @@ export const update = mutation({
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		const { id, ...rest } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Supplier not found");
 
 		if (args.code && args.code !== existing.code) {
+			const nextCode = args.code;
 			const duplicate = await ctx.db
 				.query("suppliers")
-				.withIndex("by_code", (q) => q.eq("code", args.code!))
+				.withIndex("by_code", (q) => q.eq("code", nextCode))
 				.first();
 
 			if (duplicate) {
@@ -100,17 +139,34 @@ export const update = mutation({
 			}
 		}
 
-		await ctx.db.patch(id, {
+		const patchData = {
 			...rest,
 			updatedAt: Date.now(),
+		};
+
+		await ctx.db.patch(id, patchData);
+		const updatedSupplier = await ctx.db.get(id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.supplierUpdated,
+			description: `Cập nhật nhà cung cấp ${updatedSupplier?.code ?? existing.code}`,
+			entityType: AUDIT_ENTITIES.supplier,
+			entityId: id,
+			before: toSupplierAuditSnapshot(existing),
+			after: updatedSupplier
+				? toSupplierAuditSnapshot(updatedSupplier, id)
+				: undefined,
 		});
-		return await ctx.db.get(id);
+
+		return updatedSupplier;
 	},
 });
 
 export const remove = mutation({
 	args: { id: v.id("suppliers") },
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		// Check if supplier has purchase orders
 		const orders = await ctx.db
 			.query("purchaseOrders")
@@ -121,7 +177,21 @@ export const remove = mutation({
 			throw new Error("Cannot delete supplier that has purchase orders");
 		}
 
+		const supplier = await ctx.db.get(args.id);
+		if (!supplier) {
+			throw new Error("Supplier not found");
+		}
+
 		await ctx.db.delete(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.supplierDeleted,
+			description: `Xóa nhà cung cấp ${supplier.code}`,
+			entityType: AUDIT_ENTITIES.supplier,
+			entityId: args.id,
+			before: toSupplierAuditSnapshot(supplier, args.id),
+		});
+
 		return { success: true };
 	},
 });

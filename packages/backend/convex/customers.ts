@@ -1,5 +1,8 @@
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
+import { requireCurrentUserAdmin } from "./auth";
 
 const customerPayloadValidator = {
 	name: v.string(),
@@ -35,6 +38,22 @@ const customerPayloadValidator = {
 
 const MAX_BULK_CUSTOMERS = 500;
 
+function toCustomerAuditSnapshot(
+	customer: Doc<"customers">,
+	id?: Id<"customers">,
+) {
+	return {
+		id: id ?? customer._id,
+		code: customer.code,
+		name: customer.name,
+		email: customer.email,
+		phone: customer.phone,
+		province: customer.province,
+		isActive: customer.isActive,
+		updatedAt: customer.updatedAt,
+	};
+}
+
 export const list = query({
 	args: { activeOnly: v.optional(v.boolean()) },
 	handler: async (ctx, args) => {
@@ -69,6 +88,8 @@ export const getByCode = query({
 export const create = mutation({
 	args: customerPayloadValidator,
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		const existing = await ctx.db
 			.query("customers")
 			.withIndex("by_code", (q) => q.eq("code", args.code))
@@ -79,7 +100,7 @@ export const create = mutation({
 		}
 
 		const now = Date.now();
-		return await ctx.db.insert("customers", {
+		const createdCustomerId = await ctx.db.insert("customers", {
 			name: args.name,
 			code: args.code,
 			contactPerson: args.contactPerson,
@@ -112,6 +133,21 @@ export const create = mutation({
 			createdAt: now,
 			updatedAt: now,
 		});
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.customerCreated,
+			description: `Tạo khách hàng ${args.code}`,
+			entityType: AUDIT_ENTITIES.customer,
+			entityId: createdCustomerId,
+			after: {
+				id: createdCustomerId,
+				name: args.name,
+				code: args.code,
+				isActive: args.isActive ?? true,
+			},
+		});
+
+		return createdCustomerId;
 	},
 });
 
@@ -120,6 +156,8 @@ export const createMany = mutation({
 		rows: v.array(v.object(customerPayloadValidator)),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		if (args.rows.length === 0) {
 			throw new Error("Không có dữ liệu để import");
 		}
@@ -173,6 +211,16 @@ export const createMany = mutation({
 			insertedIds.push(insertedId);
 		}
 
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.customerImported,
+			description: `Import ${insertedIds.length} khách hàng`,
+			entityType: AUDIT_ENTITIES.customer,
+			metadata: {
+				count: insertedIds.length,
+				codes: normalizedRows.map((row) => row.code),
+			},
+		});
+
 		return {
 			count: insertedIds.length,
 			insertedIds,
@@ -214,14 +262,17 @@ export const update = mutation({
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		const { id, ...rest } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Customer not found");
 
 		if (args.code && args.code !== existing.code) {
+			const nextCode = args.code;
 			const duplicate = await ctx.db
 				.query("customers")
-				.withIndex("by_code", (q) => q.eq("code", args.code!))
+				.withIndex("by_code", (q) => q.eq("code", nextCode))
 				.first();
 
 			if (duplicate) {
@@ -229,17 +280,34 @@ export const update = mutation({
 			}
 		}
 
-		await ctx.db.patch(id, {
+		const patchData = {
 			...rest,
 			updatedAt: Date.now(),
+		};
+
+		await ctx.db.patch(id, patchData);
+		const updatedCustomer = await ctx.db.get(id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.customerUpdated,
+			description: `Cập nhật khách hàng ${updatedCustomer?.code ?? existing.code}`,
+			entityType: AUDIT_ENTITIES.customer,
+			entityId: id,
+			before: toCustomerAuditSnapshot(existing),
+			after: updatedCustomer
+				? toCustomerAuditSnapshot(updatedCustomer, id)
+				: undefined,
 		});
-		return await ctx.db.get(id);
+
+		return updatedCustomer;
 	},
 });
 
 export const remove = mutation({
 	args: { id: v.id("customers") },
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		const customer = await ctx.db.get(args.id);
 		if (!customer) {
 			throw new Error("Customer not found");
@@ -266,6 +334,15 @@ export const remove = mutation({
 		}
 
 		await ctx.db.delete(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.customerDeleted,
+			description: `Xóa khách hàng ${customer.code}`,
+			entityType: AUDIT_ENTITIES.customer,
+			entityId: args.id,
+			before: toCustomerAuditSnapshot(customer, args.id),
+		});
+
 		return { success: true };
 	},
 });
@@ -273,6 +350,8 @@ export const remove = mutation({
 export const removeMany = mutation({
 	args: { ids: v.array(v.id("customers")) },
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		if (args.ids.length === 0) {
 			throw new Error("Không có khách hàng để xóa");
 		}
@@ -312,9 +391,31 @@ export const removeMany = mutation({
 			}
 		}
 
+		const removedCustomers: Array<{ id: string; code: string; name: string }> =
+			[];
 		for (const customerId of uniqueIds) {
+			const customer = await ctx.db.get(customerId);
+			if (!customer) {
+				continue;
+			}
+
 			await ctx.db.delete(customerId);
+			removedCustomers.push({
+				id: customerId,
+				code: customer.code,
+				name: customer.name,
+			});
 		}
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.customerDeleted,
+			description: `Xóa hàng loạt ${removedCustomers.length} khách hàng`,
+			entityType: AUDIT_ENTITIES.customer,
+			metadata: {
+				count: removedCustomers.length,
+				customers: removedCustomers,
+			},
+		});
 
 		return { success: true, deletedCount: uniqueIds.length };
 	},

@@ -2,18 +2,21 @@ import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
+import { v } from "convex/values";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import {
-	mutation,
-	query,
 	type MutationCtx,
+	mutation,
 	type QueryCtx,
+	query,
 } from "./_generated/server";
-import { v } from "convex/values";
 import authConfig from "./auth.config";
 
-const siteUrl = process.env.SITE_URL!;
+const siteUrl = process.env.SITE_URL;
+if (!siteUrl) {
+	throw new Error("Missing SITE_URL environment variable");
+}
 const localWebOrigins = ["http://localhost:3001", "http://127.0.0.1:3001"];
 const extraTrustedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
 	.split(",")
@@ -366,6 +369,10 @@ async function requireAdmin(ctx: QueryCtx | MutationCtx) {
 	return adminState;
 }
 
+export async function requireCurrentUserAdmin(ctx: QueryCtx | MutationCtx) {
+	return await requireAdmin(ctx);
+}
+
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
 function createAuth(
@@ -553,6 +560,8 @@ export const adminListAuditLogs = query({
 		limit: v.optional(v.number()),
 		fromTs: v.optional(v.number()),
 		toTs: v.optional(v.number()),
+		entityType: v.optional(v.string()),
+		actionPrefix: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
 		await requireAdmin(ctx);
@@ -571,11 +580,7 @@ export const adminListAuditLogs = query({
 				? Math.floor(args.toTs)
 				: undefined;
 
-		if (
-			fromTs !== undefined &&
-			toTs !== undefined &&
-			fromTs > toTs
-		) {
+		if (fromTs !== undefined && toTs !== undefined && fromTs > toTs) {
 			throw new Error("Khoảng thời gian không hợp lệ");
 		}
 
@@ -591,25 +596,44 @@ export const adminListAuditLogs = query({
 			if (fromTs !== undefined) {
 				return ctx.db
 					.query("auditLogs")
-					.withIndex("by_createdAt", (query) =>
-						query.gte("createdAt", fromTs),
-					);
+					.withIndex("by_createdAt", (query) => query.gte("createdAt", fromTs));
 			}
 
 			if (toTs !== undefined) {
 				return ctx.db
 					.query("auditLogs")
-					.withIndex("by_createdAt", (query) =>
-						query.lte("createdAt", toTs),
-					);
+					.withIndex("by_createdAt", (query) => query.lte("createdAt", toTs));
 			}
 
 			return ctx.db.query("auditLogs").withIndex("by_createdAt");
 		})();
 
-		const logs = await logsQuery.order("desc").take(paginationLimit);
+		const logs =
+			args.entityType || args.actionPrefix
+				? await logsQuery.order("desc").collect()
+				: await logsQuery.order("desc").take(paginationLimit);
+		const entityTypeFilter = args.entityType?.trim().toLowerCase();
+		const actionPrefixFilter = args.actionPrefix?.trim().toLowerCase();
 
-		return logs.map((item) => ({
+		const filteredLogs = logs.filter((item) => {
+			if (
+				entityTypeFilter &&
+				item.entityType.trim().toLowerCase() !== entityTypeFilter
+			) {
+				return false;
+			}
+
+			if (
+				actionPrefixFilter &&
+				!item.action.trim().toLowerCase().startsWith(actionPrefixFilter)
+			) {
+				return false;
+			}
+
+			return true;
+		});
+
+		return filteredLogs.slice(0, paginationLimit).map((item) => ({
 			id: item._id,
 			action: item.action,
 			description: item.description,

@@ -11,7 +11,7 @@ import {
 	TriangleAlert,
 	UserPlus,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -109,6 +109,22 @@ const AUDIT_LOG_WORKBOOK_HEADER_ORDER = [
 	AUDIT_LOG_WORKBOOK_COLUMNS.metadata,
 ] as const;
 
+const AUDIT_ENTITY_TYPE_OPTIONS = [
+	{ value: "all", label: "Tất cả phân hệ" },
+	{ value: "user", label: "Quản trị user" },
+	{ value: "customer", label: "Khách hàng" },
+	{ value: "product", label: "Sản phẩm" },
+	{ value: "supplier", label: "Nhà cung cấp" },
+] as const;
+
+const AUDIT_ACTION_PREFIX_OPTIONS = [
+	{ value: "all", label: "Tất cả hành động" },
+	{ value: "user.", label: "Nhóm user" },
+	{ value: "customer.", label: "Nhóm khách hàng" },
+	{ value: "product.", label: "Nhóm sản phẩm" },
+	{ value: "supplier.", label: "Nhóm nhà cung cấp" },
+] as const;
+
 type UserRole = "admin" | "user";
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -144,8 +160,43 @@ function formatAuditAction(action: string) {
 			return "Đổi quyền";
 		case "user.password_changed":
 			return "Đổi mật khẩu";
+		case "customer.created":
+			return "Tạo khách hàng";
+		case "customer.updated":
+			return "Sửa khách hàng";
+		case "customer.deleted":
+			return "Xóa khách hàng";
+		case "customer.imported":
+			return "Import khách hàng";
+		case "product.created":
+			return "Tạo sản phẩm";
+		case "product.updated":
+			return "Sửa sản phẩm";
+		case "product.deleted":
+			return "Xóa sản phẩm";
+		case "supplier.created":
+			return "Tạo nhà cung cấp";
+		case "supplier.updated":
+			return "Sửa nhà cung cấp";
+		case "supplier.deleted":
+			return "Xóa nhà cung cấp";
 		default:
 			return action;
+	}
+}
+
+function formatAuditEntityType(entityType: string | undefined) {
+	switch (entityType) {
+		case "user":
+			return "Quản trị user";
+		case "customer":
+			return "Khách hàng";
+		case "product":
+			return "Sản phẩm";
+		case "supplier":
+			return "Nhà cung cấp";
+		default:
+			return entityType ?? "-";
 	}
 }
 
@@ -183,6 +234,8 @@ function AdminUsersPage() {
 	);
 	const [auditFromDate, setAuditFromDate] = useState("");
 	const [auditToDate, setAuditToDate] = useState("");
+	const [auditEntityType, setAuditEntityType] = useState<string>("all");
+	const [auditActionPrefix, setAuditActionPrefix] = useState<string>("all");
 	const [isExportingAuditLogs, setIsExportingAuditLogs] = useState(false);
 
 	const auditFromTs = useMemo(
@@ -205,6 +258,9 @@ function AdminUsersPage() {
 					limit: 300,
 					fromTs: auditFromTs,
 					toTs: auditToTs,
+					entityType: auditEntityType === "all" ? undefined : auditEntityType,
+					actionPrefix:
+						auditActionPrefix === "all" ? undefined : auditActionPrefix,
 				}
 			: "skip",
 	);
@@ -241,35 +297,42 @@ function AdminUsersPage() {
 	const [newPassword, setNewPassword] = useState("");
 	const [isChangingPassword, setIsChangingPassword] = useState(false);
 
-	const loadUsers = async (allowBootstrapRetry = true) => {
-		setIsLoadingUsers(true);
-		try {
-			const payload = (await adminListUsers({
-				limit: 200,
-			})) as ListUsersResponse;
-			setUsers(payload.users ?? []);
-		} catch (error: unknown) {
-			const message = getErrorMessage(
-				error,
-				"Không thể tải danh sách người dùng",
-			);
-			if (allowBootstrapRetry) {
+	const loadUsers = useCallback(
+		async (allowBootstrapRetry = true) => {
+			const runLoadUsers = async (allowRetry: boolean): Promise<void> => {
+				setIsLoadingUsers(true);
 				try {
-					await bootstrapAdminRole({});
-					await loadUsers(false);
-					return;
-				} catch (bootstrapError: unknown) {
-					toast.error(
-						getErrorMessage(bootstrapError, "Không thể gán quyền admin"),
+					const payload = (await adminListUsers({
+						limit: 200,
+					})) as ListUsersResponse;
+					setUsers(payload.users ?? []);
+				} catch (error: unknown) {
+					const message = getErrorMessage(
+						error,
+						"Không thể tải danh sách người dùng",
 					);
-				}
-			}
+					if (allowRetry) {
+						try {
+							await bootstrapAdminRole({});
+							await runLoadUsers(false);
+							return;
+						} catch (bootstrapError: unknown) {
+							toast.error(
+								getErrorMessage(bootstrapError, "Không thể gán quyền admin"),
+							);
+						}
+					}
 
-			toast.error(message);
-		} finally {
-			setIsLoadingUsers(false);
-		}
-	};
+					toast.error(message);
+				} finally {
+					setIsLoadingUsers(false);
+				}
+			};
+
+			await runLoadUsers(allowBootstrapRetry);
+		},
+		[adminListUsers, bootstrapAdminRole],
+	);
 
 	useEffect(() => {
 		if (!isCurrentUserAdmin) {
@@ -279,16 +342,6 @@ function AdminUsersPage() {
 		let cancelled = false;
 		const run = async () => {
 			try {
-				if (cancelled) {
-					return;
-				}
-
-				try {
-					await bootstrapAdminRole({});
-				} catch {
-					// Fallback to existing 403 retry flow in loadUsers.
-				}
-
 				if (!cancelled) {
 					await loadUsers();
 				}
@@ -304,7 +357,7 @@ function AdminUsersPage() {
 		return () => {
 			cancelled = true;
 		};
-	}, [isCurrentUserAdmin]);
+	}, [isCurrentUserAdmin, loadUsers]);
 
 	const filteredUsers = useMemo(() => {
 		const keyword = search.trim().toLowerCase();
@@ -327,7 +380,11 @@ function AdminUsersPage() {
 		}
 
 		return source.filter((logItem) => {
-			const actor = (logItem.actorEmail ?? logItem.actorUserId ?? "").toLowerCase();
+			const actor = (
+				logItem.actorEmail ??
+				logItem.actorUserId ??
+				""
+			).toLowerCase();
 			const description = (logItem.description ?? "").toLowerCase();
 			const action = formatAuditAction(logItem.action).toLowerCase();
 			return (
@@ -580,7 +637,9 @@ function AdminUsersPage() {
 					logItem.actorEmail ?? logItem.actorUserId ?? "-",
 				[AUDIT_LOG_WORKBOOK_COLUMNS.action]: formatAuditAction(logItem.action),
 				[AUDIT_LOG_WORKBOOK_COLUMNS.description]: logItem.description,
-				[AUDIT_LOG_WORKBOOK_COLUMNS.entityType]: logItem.entityType ?? "",
+				[AUDIT_LOG_WORKBOOK_COLUMNS.entityType]: formatAuditEntityType(
+					logItem.entityType,
+				),
 				[AUDIT_LOG_WORKBOOK_COLUMNS.entityId]: logItem.entityId ?? "",
 				[AUDIT_LOG_WORKBOOK_COLUMNS.before]: logItem.before
 					? JSON.stringify(logItem.before)
@@ -863,15 +922,60 @@ function AdminUsersPage() {
 								/>
 							</div>
 						</div>
-						{(auditFromDate || auditToDate) && (
+						<div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+							<div className="space-y-1">
+								<Label className="text-xs">Phân hệ</Label>
+								<Select
+									value={auditEntityType}
+									onValueChange={(value) => setAuditEntityType(value ?? "all")}
+								>
+									<SelectTrigger className="w-full sm:w-44">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{AUDIT_ENTITY_TYPE_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-1">
+								<Label className="text-xs">Nhóm hành động</Label>
+								<Select
+									value={auditActionPrefix}
+									onValueChange={(value) =>
+										setAuditActionPrefix(value ?? "all")
+									}
+								>
+									<SelectTrigger className="w-full sm:w-44">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{AUDIT_ACTION_PREFIX_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
+						{(auditFromDate ||
+							auditToDate ||
+							auditEntityType !== "all" ||
+							auditActionPrefix !== "all") && (
 							<Button
 								variant="outline"
 								onClick={() => {
 									setAuditFromDate("");
 									setAuditToDate("");
+									setAuditEntityType("all");
+									setAuditActionPrefix("all");
 								}}
 							>
-								Xóa lọc ngày
+								Xóa bộ lọc
 							</Button>
 						)}
 						<Button
@@ -911,6 +1015,7 @@ function AdminUsersPage() {
 							<TableHeader>
 								<TableRow>
 									<TableHead>Thời gian</TableHead>
+									<TableHead>Phân hệ</TableHead>
 									<TableHead>Người thực hiện</TableHead>
 									<TableHead>Hành động</TableHead>
 									<TableHead>Mô tả</TableHead>
@@ -925,6 +1030,9 @@ function AdminUsersPage() {
 										}
 									>
 										<TableCell>{formatCreatedAt(logItem.createdAt)}</TableCell>
+										<TableCell>
+											{formatAuditEntityType(logItem.entityType)}
+										</TableCell>
 										<TableCell>
 											{logItem.actorEmail ?? logItem.actorUserId ?? "-"}
 										</TableCell>
@@ -1067,7 +1175,9 @@ function AdminUsersPage() {
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel disabled={!!changingRoleUserId}>Hủy</AlertDialogCancel>
+						<AlertDialogCancel disabled={!!changingRoleUserId}>
+							Hủy
+						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={() => {
 								void handleConfirmRoleChange();
@@ -1101,7 +1211,9 @@ function AdminUsersPage() {
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel disabled={!!deletingUserId}>Hủy</AlertDialogCancel>
+						<AlertDialogCancel disabled={!!deletingUserId}>
+							Hủy
+						</AlertDialogCancel>
 						<AlertDialogAction
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 							onClick={() => {

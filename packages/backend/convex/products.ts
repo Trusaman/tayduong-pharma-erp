@@ -1,11 +1,28 @@
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, writeAuditLog } from "./auditLogs";
+import { requireCurrentUserAdmin } from "./auth";
 
 const pickDefined = <T extends Record<string, unknown>>(input: T) => {
 	return Object.fromEntries(
 		Object.entries(input).filter(([, value]) => value !== undefined),
 	) as Partial<T>;
 };
+
+function toProductAuditSnapshot(product: Doc<"products">, id?: Id<"products">) {
+	return {
+		id: id ?? product._id,
+		sku: product.sku,
+		name: product.name,
+		categoryId: product.categoryId,
+		purchasePrice: product.purchasePrice,
+		salePrice: product.salePrice,
+		minStock: product.minStock,
+		isActive: product.isActive,
+		updatedAt: product.updatedAt,
+	};
+}
 
 export const list = query({
 	args: {
@@ -96,6 +113,8 @@ export const create = mutation({
 		minStock: v.number(),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		// Check if SKU already exists
 		const existing = await ctx.db
 			.query("products")
@@ -107,7 +126,7 @@ export const create = mutation({
 		}
 
 		const now = Date.now();
-		return await ctx.db.insert("products", {
+		const createdProductId = await ctx.db.insert("products", {
 			name: args.name,
 			sku: args.sku,
 			...(args.categoryId !== undefined ? { categoryId: args.categoryId } : {}),
@@ -170,6 +189,23 @@ export const create = mutation({
 			createdAt: now,
 			updatedAt: now,
 		});
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.productCreated,
+			description: `Tạo sản phẩm ${args.sku}`,
+			entityType: AUDIT_ENTITIES.product,
+			entityId: createdProductId,
+			after: {
+				id: createdProductId,
+				name: args.name,
+				sku: args.sku,
+				isActive: args.isActive ?? true,
+				purchasePrice: args.purchasePrice,
+				salePrice: args.salePrice,
+			},
+		});
+
+		return createdProductId;
 	},
 });
 
@@ -220,6 +256,8 @@ export const update = mutation({
 		isActive: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		const { id, ...rest } = args;
 		const existing = await ctx.db.get(id);
 		if (!existing) throw new Error("Product not found");
@@ -237,20 +275,34 @@ export const update = mutation({
 			}
 		}
 
-		await ctx.db.patch(
-			id,
-			pickDefined({
-				...rest,
-				updatedAt: Date.now(),
-			}),
-		);
-		return await ctx.db.get(id);
+		const patchData = pickDefined({
+			...rest,
+			updatedAt: Date.now(),
+		});
+
+		await ctx.db.patch(id, patchData);
+		const updatedProduct = await ctx.db.get(id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.productUpdated,
+			description: `Cập nhật sản phẩm ${updatedProduct?.sku ?? existing.sku}`,
+			entityType: AUDIT_ENTITIES.product,
+			entityId: id,
+			before: toProductAuditSnapshot(existing),
+			after: updatedProduct
+				? toProductAuditSnapshot(updatedProduct, id)
+				: undefined,
+		});
+
+		return updatedProduct;
 	},
 });
 
 export const remove = mutation({
 	args: { id: v.id("products") },
 	handler: async (ctx, args) => {
+		await requireCurrentUserAdmin(ctx);
+
 		// Check if product has inventory
 		const inventory = await ctx.db
 			.query("inventory")
@@ -261,7 +313,21 @@ export const remove = mutation({
 			throw new Error("Cannot delete product that has inventory");
 		}
 
+		const product = await ctx.db.get(args.id);
+		if (!product) {
+			throw new Error("Product not found");
+		}
+
 		await ctx.db.delete(args.id);
+
+		await writeAuditLog(ctx, {
+			action: AUDIT_ACTIONS.productDeleted,
+			description: `Xóa sản phẩm ${product.sku}`,
+			entityType: AUDIT_ENTITIES.product,
+			entityId: args.id,
+			before: toProductAuditSnapshot(product, args.id),
+		});
+
 		return { success: true };
 	},
 });
