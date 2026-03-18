@@ -7,13 +7,21 @@ import { query } from "./_generated/server";
 import authConfig from "./auth.config";
 
 const siteUrl = process.env.SITE_URL!;
+const localWebOrigins = ["http://localhost:3001", "http://127.0.0.1:3001"];
+const extraTrustedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
+	.split(",")
+	.map((origin) => origin.trim())
+	.filter((origin) => origin.length > 0);
+const trustedOrigins = Array.from(
+	new Set([siteUrl, ...localWebOrigins, ...extraTrustedOrigins]),
+);
 
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
 function createAuth(ctx: GenericCtx<DataModel>) {
 	return betterAuth({
 		baseURL: siteUrl,
-		trustedOrigins: [siteUrl],
+		trustedOrigins,
 		database: authComponent.adapter(ctx),
 		emailAndPassword: {
 			enabled: true,

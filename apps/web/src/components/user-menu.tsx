@@ -1,5 +1,7 @@
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
 import { useQuery } from "convex/react";
+import { useState } from "react";
+import { toast } from "sonner";
 
 import {
 	DropdownMenu,
@@ -16,6 +18,26 @@ import { Button } from "./ui/button";
 
 export default function UserMenu() {
 	const user = useQuery(api.auth.getCurrentUser);
+	const [isSigningOut, setIsSigningOut] = useState(false);
+
+	const handleSignOut = async () => {
+		if (isSigningOut) {
+			return;
+		}
+
+		setIsSigningOut(true);
+		try {
+			const { error } = await authClient.signOut();
+			if (error) {
+				toast.error(error.message || "Đăng xuất thất bại");
+				return;
+			}
+
+			window.location.assign("/");
+		} finally {
+			setIsSigningOut(false);
+		}
+	};
 
 	return (
 		<DropdownMenu>
@@ -29,17 +51,12 @@ export default function UserMenu() {
 					<DropdownMenuItem>{user?.email}</DropdownMenuItem>
 					<DropdownMenuItem
 						variant="destructive"
+						disabled={isSigningOut}
 						onClick={() => {
-							authClient.signOut({
-								fetchOptions: {
-									onSuccess: () => {
-										location.reload();
-									},
-								},
-							});
+							void handleSignOut();
 						}}
 					>
-						Đăng xuất
+						{isSigningOut ? "Đang đăng xuất..." : "Đăng xuất"}
 					</DropdownMenuItem>
 				</DropdownMenuGroup>
 			</DropdownMenuContent>
