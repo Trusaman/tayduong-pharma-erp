@@ -784,13 +784,13 @@ function EmployeesPage() {
 												: ""
 										}
 									>
-									<TableCell>
-										{getPortraitImageUrl(emp) ? (
-											<img
-												src={getPortraitImageUrl(emp) ?? ""}
-												alt={`Ảnh ${emp.name}`}
-												className="h-12 w-12 rounded-md object-cover ring-1 ring-border"
-											/>
+										<TableCell>
+											{getPortraitImageUrl(emp) ? (
+												<img
+													src={getPortraitImageUrl(emp) ?? ""}
+													alt={`Ảnh ${emp.name}`}
+													className="h-12 w-12 rounded-md object-cover ring-1 ring-border"
+												/>
 											) : (
 												<div className="flex h-12 w-12 items-center justify-center rounded-md bg-muted text-muted-foreground text-xs">
 													Chưa có

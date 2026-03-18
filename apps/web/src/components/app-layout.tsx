@@ -1,8 +1,6 @@
 import { Authenticated, AuthLoading, Unauthenticated } from "convex/react";
-import { useState } from "react";
 import Sidebar from "@/components/sidebar";
 import SignInForm from "@/components/sign-in-form";
-import SignUpForm from "@/components/sign-up-form";
 import UserMenu from "@/components/user-menu";
 
 interface AppLayoutProps {
@@ -10,8 +8,6 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children }: AppLayoutProps) {
-	const [showSignIn, setShowSignIn] = useState(false);
-
 	return (
 		<>
 			<Authenticated>
@@ -33,11 +29,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 			<Unauthenticated>
 				<div className="flex min-h-screen items-center justify-center bg-muted/40">
 					<div className="w-full max-w-md p-6">
-						{showSignIn ? (
-							<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
-						) : (
-							<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
-						)}
+						<SignInForm />
 					</div>
 				</div>
 			</Unauthenticated>

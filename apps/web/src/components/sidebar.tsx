@@ -1,4 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
+import { useQuery } from "convex/react";
 import {
 	BadgePercent,
 	Calculator,
@@ -9,6 +11,7 @@ import {
 	Menu,
 	Package,
 	ShoppingCart,
+	Shield,
 	UserCheck,
 	UserCircle,
 	Users,
@@ -42,6 +45,14 @@ export default function Sidebar() {
 	const [collapsed, setCollapsed] = useState(false);
 	const router = useRouterState();
 	const currentPath = router.location.pathname;
+	const isCurrentUserAdmin = useQuery(api.auth.isCurrentUserAdmin);
+
+	const navigationItems = isCurrentUserAdmin
+		? [
+				...navigation,
+				{ name: "Quản trị user", href: "/admin-users", icon: Shield },
+			]
+		: navigation;
 
 	return (
 		<div
@@ -90,7 +101,7 @@ export default function Sidebar() {
 			{/* Navigation */}
 			<ScrollArea className="flex-1 bg-slate-50 px-2 py-4">
 				<nav className="flex flex-col gap-1">
-					{navigation.map((item) => {
+					{navigationItems.map((item) => {
 						const isActive = currentPath.startsWith(item.href);
 						return (
 							<Link

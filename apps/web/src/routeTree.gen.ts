@@ -22,6 +22,7 @@ import { Route as DiscountDebtsRouteImport } from './routes/discount-debts'
 import { Route as DiscountCalculationsRouteImport } from './routes/discount-calculations'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CustomersRouteImport } from './routes/customers'
+import { Route as AdminUsersRouteImport } from './routes/admin-users'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiSystemRestoreRouteImport } from './routes/api/system/restore'
 import { Route as ApiSystemBackupsRouteImport } from './routes/api/system/backups'
@@ -93,6 +94,11 @@ const CustomersRoute = CustomersRouteImport.update({
   path: '/customers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin-users',
+  path: '/admin-users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -121,6 +127,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin-users': typeof AdminUsersRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
@@ -141,6 +148,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin-users': typeof AdminUsersRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
@@ -162,6 +170,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin-users': typeof AdminUsersRoute
   '/customers': typeof CustomersRoute
   '/dashboard': typeof DashboardRoute
   '/discount-calculations': typeof DiscountCalculationsRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin-users'
     | '/customers'
     | '/dashboard'
     | '/discount-calculations'
@@ -204,6 +214,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin-users'
     | '/customers'
     | '/dashboard'
     | '/discount-calculations'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin-users'
     | '/customers'
     | '/dashboard'
     | '/discount-calculations'
@@ -245,6 +257,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminUsersRoute: typeof AdminUsersRoute
   CustomersRoute: typeof CustomersRoute
   DashboardRoute: typeof DashboardRoute
   DiscountCalculationsRoute: typeof DiscountCalculationsRoute
@@ -357,6 +370,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin-users': {
+      id: '/admin-users'
+      path: '/admin-users'
+      fullPath: '/admin-users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -397,6 +417,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminUsersRoute: AdminUsersRoute,
   CustomersRoute: CustomersRoute,
   DashboardRoute: DashboardRoute,
   DiscountCalculationsRoute: DiscountCalculationsRoute,

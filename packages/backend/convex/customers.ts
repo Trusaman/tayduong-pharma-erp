@@ -124,7 +124,9 @@ export const createMany = mutation({
 			throw new Error("Không có dữ liệu để import");
 		}
 		if (args.rows.length > MAX_BULK_CUSTOMERS) {
-			throw new Error(`Chỉ có thể import tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`);
+			throw new Error(
+				`Chỉ có thể import tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`,
+			);
 		}
 
 		const normalizedRows = args.rows.map((row) => ({
@@ -143,7 +145,9 @@ export const createMany = mutation({
 				normalizedRows.findIndex((item) => item.code === row.code) !== index,
 		);
 		if (duplicateInFile) {
-			throw new Error(`Mã khách hàng bị trùng trong file import: ${duplicateInFile.code}`);
+			throw new Error(
+				`Mã khách hàng bị trùng trong file import: ${duplicateInFile.code}`,
+			);
 		}
 
 		for (const row of normalizedRows) {
@@ -256,7 +260,9 @@ export const remove = mutation({
 			.first();
 
 		if (discountRule) {
-			throw new Error("Không thể xóa khách hàng đang được dùng trong bảng chiết khấu");
+			throw new Error(
+				"Không thể xóa khách hàng đang được dùng trong bảng chiết khấu",
+			);
 		}
 
 		await ctx.db.delete(args.id);
@@ -271,7 +277,9 @@ export const removeMany = mutation({
 			throw new Error("Không có khách hàng để xóa");
 		}
 		if (args.ids.length > MAX_BULK_CUSTOMERS) {
-			throw new Error(`Chỉ có thể xóa tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`);
+			throw new Error(
+				`Chỉ có thể xóa tối đa ${MAX_BULK_CUSTOMERS} khách hàng mỗi lần`,
+			);
 		}
 
 		const uniqueIds = [...new Set(args.ids)];

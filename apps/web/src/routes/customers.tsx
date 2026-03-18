@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "@tayduong-pharma-erp/backend/convex/_generated/api";
-import type { Doc, Id } from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
+import type {
+	Doc,
+	Id,
+} from "@tayduong-pharma-erp/backend/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import {
 	Download,
@@ -207,10 +210,23 @@ function toCellString(value: unknown) {
 function parseActiveStatus(value: string) {
 	const normalized = value.trim().toLowerCase();
 	if (!normalized) return true;
-	if (["hoạt động", "hoat dong", "active", "1", "true", "yes"].includes(normalized)) {
+	if (
+		["hoạt động", "hoat dong", "active", "1", "true", "yes"].includes(
+			normalized,
+		)
+	) {
 		return true;
 	}
-	if (["không hoạt động", "khong hoat dong", "inactive", "0", "false", "no"].includes(normalized)) {
+	if (
+		[
+			"không hoạt động",
+			"khong hoat dong",
+			"inactive",
+			"0",
+			"false",
+			"no",
+		].includes(normalized)
+	) {
 		return false;
 	}
 	throw new Error(`Giá trị trạng thái không hợp lệ: ${value}`);
@@ -266,7 +282,13 @@ function getTerritoryLabel(customer: Doc<"customers">) {
 	return customer.territory ?? customer.province ?? "-";
 }
 
-function FormSection({ title, children }: { title: string; children: ReactNode }) {
+function FormSection({
+	title,
+	children,
+}: {
+	title: string;
+	children: ReactNode;
+}) {
 	return (
 		<section className="overflow-hidden rounded-lg border bg-background">
 			<div className="border-b bg-muted/40 px-4 py-3 font-semibold text-sm">
@@ -277,13 +299,7 @@ function FormSection({ title, children }: { title: string; children: ReactNode }
 	);
 }
 
-function FormRow({
-	label,
-	children,
-}: {
-	label: string;
-	children: ReactNode;
-}) {
+function FormRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<div className="grid items-start gap-3 border-b px-4 py-3 last:border-b-0 md:grid-cols-[220px_minmax(0,1fr)]">
 			<div className="pt-2 font-medium text-sm">{label}</div>
@@ -294,7 +310,9 @@ function FormRow({
 
 function CustomersPage() {
 	const [search, setSearch] = useState("");
-	const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+	const [statusFilter, setStatusFilter] = useState<
+		"all" | "active" | "inactive"
+	>("all");
 	const [provinceFilter, setProvinceFilter] = useState("all");
 	const [territoryFilter, setTerritoryFilter] = useState("all");
 	const [dialogOpen, setDialogOpen] = useState(false);
@@ -302,7 +320,9 @@ function CustomersPage() {
 	const [form, setForm] = useState<CustomerForm>(initialForm);
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 	const [deletingId, setDeletingId] = useState<Id<"customers"> | null>(null);
-	const [selectedCustomerIds, setSelectedCustomerIds] = useState<Id<"customers">[]>([]);
+	const [selectedCustomerIds, setSelectedCustomerIds] = useState<
+		Id<"customers">[]
+	>([]);
 	const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 	const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -322,8 +342,7 @@ function CustomersPage() {
 					.map((customer) => customer.province?.trim())
 					.filter((value): value is string => Boolean(value)),
 			),
-		]
-			.sort((a, b) => a.localeCompare(b, "vi"));
+		].sort((a, b) => a.localeCompare(b, "vi"));
 	}, [customers]);
 
 	const territoryOptions = useMemo(() => {
@@ -334,37 +353,36 @@ function CustomersPage() {
 					.map((customer) => customer.territory?.trim())
 					.filter((value): value is string => Boolean(value)),
 			),
-		]
-			.sort((a, b) => a.localeCompare(b, "vi"));
+		].sort((a, b) => a.localeCompare(b, "vi"));
 	}, [customers]);
 
-	const filteredCustomers = customers?.filter(
-		(customer) => {
-			const normalizedSearch = search.trim().toLowerCase();
-			const matchesSearch =
-				!normalizedSearch ||
-				customer.name.toLowerCase().includes(normalizedSearch) ||
-				customer.code.toLowerCase().includes(normalizedSearch) ||
-				(customer.contactPerson ?? "").toLowerCase().includes(normalizedSearch) ||
-				(customer.phone ?? "").toLowerCase().includes(normalizedSearch);
-			const matchesStatus =
-				statusFilter === "all" ||
-				(statusFilter === "active" && customer.isActive) ||
-				(statusFilter === "inactive" && !customer.isActive);
-			const matchesProvince =
-				provinceFilter === "all" ||
-				(customer.province?.trim() ?? "") === provinceFilter;
-			const matchesTerritory =
-				territoryFilter === "all" ||
-				(customer.territory?.trim() ?? "") === territoryFilter;
+	const filteredCustomers = customers?.filter((customer) => {
+		const normalizedSearch = search.trim().toLowerCase();
+		const matchesSearch =
+			!normalizedSearch ||
+			customer.name.toLowerCase().includes(normalizedSearch) ||
+			customer.code.toLowerCase().includes(normalizedSearch) ||
+			(customer.contactPerson ?? "").toLowerCase().includes(normalizedSearch) ||
+			(customer.phone ?? "").toLowerCase().includes(normalizedSearch);
+		const matchesStatus =
+			statusFilter === "all" ||
+			(statusFilter === "active" && customer.isActive) ||
+			(statusFilter === "inactive" && !customer.isActive);
+		const matchesProvince =
+			provinceFilter === "all" ||
+			(customer.province?.trim() ?? "") === provinceFilter;
+		const matchesTerritory =
+			territoryFilter === "all" ||
+			(customer.territory?.trim() ?? "") === territoryFilter;
 
-			return (
-				matchesSearch && matchesStatus && matchesProvince && matchesTerritory
-			);
-		},
+		return (
+			matchesSearch && matchesStatus && matchesProvince && matchesTerritory
+		);
+	});
+
+	const filteredCustomerIds = (filteredCustomers ?? []).map(
+		(customer) => customer._id,
 	);
-
-	const filteredCustomerIds = (filteredCustomers ?? []).map((customer) => customer._id);
 	const selectedCustomerIdSet = useMemo(
 		() => new Set(selectedCustomerIds),
 		[selectedCustomerIds],
@@ -392,7 +410,9 @@ function CustomersPage() {
 		const primaryContact = formatOptionalString(
 			getPrimaryContactNameFromValues({
 				orderResponsibleName: formatOptionalString(form.orderResponsibleName),
-				paymentResponsibleName: formatOptionalString(form.paymentResponsibleName),
+				paymentResponsibleName: formatOptionalString(
+					form.paymentResponsibleName,
+				),
 				biddingContactName: formatOptionalString(form.biddingContactName),
 				paymentContactName: formatOptionalString(form.paymentContactName),
 				receivingContactName: formatOptionalString(form.receivingContactName),
@@ -585,8 +605,10 @@ function CustomersPage() {
 				[customerWorkbookColumns.territory]: customer.territory ?? "",
 				[customerWorkbookColumns.taxId]: customer.taxId ?? "",
 				[customerWorkbookColumns.billingAddress]: customer.billingAddress ?? "",
-				[customerWorkbookColumns.shippingAddress]: customer.shippingAddress ?? "",
-				[customerWorkbookColumns.companyDirector]: customer.companyDirector ?? "",
+				[customerWorkbookColumns.shippingAddress]:
+					customer.shippingAddress ?? "",
+				[customerWorkbookColumns.companyDirector]:
+					customer.companyDirector ?? "",
 				[customerWorkbookColumns.paymentResponsibleName]:
 					customer.paymentResponsibleName ?? "",
 				[customerWorkbookColumns.orderResponsibleName]:
@@ -610,9 +632,12 @@ function CustomersPage() {
 					customer.receivingContactPhone ?? "",
 				[customerWorkbookColumns.receivingContactNotes]:
 					customer.receivingContactNotes ?? "",
-				[customerWorkbookColumns.otherContactName]: customer.otherContactName ?? "",
-				[customerWorkbookColumns.otherContactPhone]: customer.otherContactPhone ?? "",
-				[customerWorkbookColumns.otherContactNotes]: customer.otherContactNotes ?? "",
+				[customerWorkbookColumns.otherContactName]:
+					customer.otherContactName ?? "",
+				[customerWorkbookColumns.otherContactPhone]:
+					customer.otherContactPhone ?? "",
+				[customerWorkbookColumns.otherContactNotes]:
+					customer.otherContactNotes ?? "",
 				[customerWorkbookColumns.notes]: customer.notes ?? "",
 				[customerWorkbookColumns.isActive]: customer.isActive
 					? "Hoạt động"
@@ -649,7 +674,9 @@ function CustomersPage() {
 		importInputRef.current?.click();
 	};
 
-	const handleImportXlsx = async (event: React.ChangeEvent<HTMLInputElement>) => {
+	const handleImportXlsx = async (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
 		const file = event.target.files?.[0];
 		if (!file) return;
 
@@ -757,55 +784,61 @@ function CustomersPage() {
 						name: toCellString(row[customerWorkbookColumns.name]),
 						contactPerson: primaryContact,
 						phone: primaryPhone,
-					email: formatOptionalString(toCellString(row[customerWorkbookColumns.email])),
-					address: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.address]),
-					),
-					province: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.province]),
-					),
-					territory: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.territory]),
-					),
-					taxId: formatOptionalString(toCellString(row[customerWorkbookColumns.taxId])),
-					billingAddress: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.billingAddress]),
-					),
-					shippingAddress: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.shippingAddress]),
-					),
-					companyDirector: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.companyDirector]),
-					),
-					paymentResponsibleName,
-					orderResponsibleName,
-					employeeCode: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.employeeCode]),
-					),
-					biddingContactName,
-					biddingContactPhone,
-					biddingContactNotes: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.biddingContactNotes]),
-					),
-					paymentContactName,
-					paymentContactPhone,
-					paymentContactNotes: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.paymentContactNotes]),
-					),
-					receivingContactName,
-					receivingContactPhone,
-					receivingContactNotes: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.receivingContactNotes]),
-					),
-					otherContactName,
-					otherContactPhone,
-					otherContactNotes: formatOptionalString(
-						toCellString(row[customerWorkbookColumns.otherContactNotes]),
-					),
-					notes: formatOptionalString(toCellString(row[customerWorkbookColumns.notes])),
-					isActive: parseActiveStatus(
-						toCellString(row[customerWorkbookColumns.isActive]),
-					),
+						email: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.email]),
+						),
+						address: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.address]),
+						),
+						province: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.province]),
+						),
+						territory: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.territory]),
+						),
+						taxId: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.taxId]),
+						),
+						billingAddress: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.billingAddress]),
+						),
+						shippingAddress: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.shippingAddress]),
+						),
+						companyDirector: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.companyDirector]),
+						),
+						paymentResponsibleName,
+						orderResponsibleName,
+						employeeCode: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.employeeCode]),
+						),
+						biddingContactName,
+						biddingContactPhone,
+						biddingContactNotes: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.biddingContactNotes]),
+						),
+						paymentContactName,
+						paymentContactPhone,
+						paymentContactNotes: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.paymentContactNotes]),
+						),
+						receivingContactName,
+						receivingContactPhone,
+						receivingContactNotes: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.receivingContactNotes]),
+						),
+						otherContactName,
+						otherContactPhone,
+						otherContactNotes: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.otherContactNotes]),
+						),
+						notes: formatOptionalString(
+							toCellString(row[customerWorkbookColumns.notes]),
+						),
+						isActive: parseActiveStatus(
+							toCellString(row[customerWorkbookColumns.isActive]),
+						),
 					};
 				})
 				.filter((row) => row.code || row.name);
@@ -976,7 +1009,9 @@ function CustomersPage() {
 									<FormRow label="Nhân viên phụ trách (Mã nhân viên)">
 										<Input
 											value={form.employeeCode}
-											onChange={(e) => updateField("employeeCode", e.target.value)}
+											onChange={(e) =>
+												updateField("employeeCode", e.target.value)
+											}
 											placeholder="Nhập mã nhân viên"
 										/>
 									</FormRow>
@@ -1180,7 +1215,9 @@ function CustomersPage() {
 											/>
 										</TableCell>
 										<TableCell className="font-mono">{customer.code}</TableCell>
-										<TableCell className="font-medium">{customer.name}</TableCell>
+										<TableCell className="font-medium">
+											{customer.name}
+										</TableCell>
 										<TableCell>{getPrimaryContactName(customer)}</TableCell>
 										<TableCell>{getPrimaryPhone(customer)}</TableCell>
 										<TableCell>{getTerritoryLabel(customer)}</TableCell>
@@ -1226,7 +1263,8 @@ function CustomersPage() {
 						</AlertDialogMedia>
 						<AlertDialogTitle>Xác nhận xóa khách hàng</AlertDialogTitle>
 						<AlertDialogDescription>
-							Bạn sắp xóa khách hàng này khỏi hệ thống. Hành động không thể hoàn tác.
+							Bạn sắp xóa khách hàng này khỏi hệ thống. Hành động không thể hoàn
+							tác.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
@@ -1252,8 +1290,8 @@ function CustomersPage() {
 						</AlertDialogMedia>
 						<AlertDialogTitle>Xác nhận xóa nhiều khách hàng</AlertDialogTitle>
 						<AlertDialogDescription>
-							Bạn sắp xóa {selectedCustomers.length} khách hàng đã chọn. Hành động
-							không thể hoàn tác.
+							Bạn sắp xóa {selectedCustomers.length} khách hàng đã chọn. Hành
+							động không thể hoàn tác.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					{selectedCustomers.length > 0 && (
